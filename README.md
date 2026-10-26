@@ -50,6 +50,7 @@ Copy `.env.example` to `.env` or set environment variables:
 | `VISIONBENCH_MIN_IMAGES_PER_CLASS` | `3` | Minimum valid images per class |
 | `VISIONBENCH_DHASH_THRESHOLD` | `5` | Max dHash Hamming distance for near duplicates |
 | `VISIONBENCH_LOW_INFO_STD_THRESHOLD` | `3.0` | Gray std below which perceptual matching is skipped |
+| `VISIONBENCH_LOW_INFO_POPCOUNT_MIN` / `_MAX` | `8` / `56` | dHash popcount outside this range skips perceptual matching |
 | `VISIONBENCH_REPORT_SAMPLES_PER_CLASS` | `8` | Seeded sample size per class in `report.json` |
 | `VISIONBENCH_CONFLICT_POLICY` | `exclude` | Label-conflict duplicate groups: `exclude` or `error` |
 
@@ -71,6 +72,7 @@ symlinks/junctions (never followed), nested folders, and name collisions.
 ```powershell
 .\.venv\Scripts\visionbench.exe dataset import C:\path\to\my_dataset --name my-dataset
 .\.venv\Scripts\visionbench.exe dataset list
+.\.venv\Scripts\visionbench.exe dataset verify ds-xxxxxxxxxxxx          # add --full to re-hash files
 .\.venv\Scripts\visionbench.exe dataset report ds-xxxxxxxxxxxx          # add --json for everything
 .\.venv\Scripts\visionbench.exe dataset split ds-xxxxxxxxxxxx --seed 42 --fractions 0.7 0.15 0.15
 ```
@@ -78,11 +80,15 @@ symlinks/junctions (never followed), nested folders, and name collisions.
 - `import` copies accepted images into `<data_root>/datasets/<id>/raw/` and writes
   `dataset.json`, `report.json` and `files.json`. It refuses to overwrite an existing dataset.
   Optional flags: `--max-image-pixels`, `--min-images-per-class`, `--dhash-threshold`,
-  `--low-info-std`.
+  `--low-info-std`, `--low-info-popcount-min`, `--low-info-popcount-max`.
+- `verify` checks the snapshot against `files.json`: fingerprint, file existence and sizes, and
+  no unrecorded files. `--full` also re-hashes every file. Any mismatch is listed and the command
+  exits with code 1.
 - `split` writes `<data_root>/datasets/<id>/splits/<split_id>/manifest.json`. The same dataset and
   config always produce a byte-identical manifest. Duplicate groups never span splits, and the
   manifest records a computed leakage check. Optional flags: `--conflict-policy exclude|error`,
-  `--allow-missing-classes`, `--dhash-threshold`, `--low-info-std`.
+  `--allow-missing-classes`, `--dhash-threshold`, `--low-info-std`, `--low-info-popcount-min`,
+  `--low-info-popcount-max`.
 - Errors print `error: ...` and exit with code 1. Add `--debug` for a traceback.
 
 Algorithm details and limitations: [EXPERIMENT_PROTOCOL.md](EXPERIMENT_PROTOCOL.md).

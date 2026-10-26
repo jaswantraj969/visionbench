@@ -91,6 +91,52 @@ def list_datasets(datasets_dir: Path) -> list[dict[str, Any]]:
     return sorted(out, key=lambda d: (d["created_at"], d["id"]))
 
 
+@dataclass(frozen=True)
+class VerifyResult:
+    dataset_id: str
+    full: bool
+    files_checked: int
+    problems: list[tuple[str, str]]  # (relpath or "<dataset>", description), sorted
+
+    @property
+    def ok(self) -> bool:
+        return not self.problems
+
+
+def verify_dataset(datasets_dir: Path, dataset_id: str, *, full: bool = False) -> VerifyResult:
+    """Check a snapshot against its stored records.
+
+    Fast mode: the fingerprint recomputed from ``files.json`` must equal ``dataset.json``;
+    every recorded file must exist in ``raw/`` with the recorded size; no unrecorded files.
+    ``full=True`` additionally re-hashes every file (SHA-256).
+    """
+    root = dataset_dir(datasets_dir, dataset_id)
+    meta = read_json(root / "dataset.json")
+    records = load_records(datasets_dir, dataset_id)
+    problems: list[tuple[str, str]] = []
+    if compute_fingerprint(records) != meta["fingerprint"]:
+        problems.append(("<dataset>", "fingerprint of files.json does not match dataset.json"))
+
+    raw = root / "raw"
+    recorded = {r.relpath for r in records}
+    for r in records:
+        path = raw.joinpath(*r.relpath.split("/"))
+        if not path.is_file():
+            problems.append((r.relpath, "missing"))
+            continue
+        size = path.stat().st_size
+        if size != r.size_bytes:
+            problems.append((r.relpath, f"size {size} != recorded {r.size_bytes}"))
+        elif full and hashlib.sha256(path.read_bytes()).hexdigest() != r.sha256:
+            problems.append((r.relpath, "sha256 differs from recorded value"))
+    if raw.is_dir():
+        for path in raw.rglob("*"):
+            rel = path.relative_to(raw).as_posix()
+            if path.is_file() and rel not in recorded:
+                problems.append((rel, "unexpected file not in files.json"))
+    return VerifyResult(dataset_id, full, len(records), sorted(problems))
+
+
 def import_dataset(
     src: Path, name: str, datasets_dir: Path, config: ScanConfig | None = None
 ) -> ImportResult:
@@ -117,7 +163,11 @@ def import_dataset(
             raise DatasetExistsError(f"dataset {dataset_id} already exists; refusing to overwrite")
 
         grouping = build_groups(
-            scan.records, dhash_threshold=config.dhash_threshold, low_info_std=config.low_info_std
+            scan.records,
+            dhash_threshold=config.dhash_threshold,
+            low_info_std=config.low_info_std,
+            popcount_min=config.low_info_popcount_min,
+            popcount_max=config.low_info_popcount_max,
         )
         report = build_report(
             dataset_id=dataset_id,
@@ -144,6 +194,8 @@ def import_dataset(
                 "min_images_per_class": config.min_images_per_class,
                 "dhash_threshold": config.dhash_threshold,
                 "low_info_std_threshold": config.low_info_std,
+                "low_info_popcount_min": config.low_info_popcount_min,
+                "low_info_popcount_max": config.low_info_popcount_max,
             },
             "validation": {
                 "accepted": len(scan.records),

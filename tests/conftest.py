@@ -1,7 +1,11 @@
 import os
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
+import vb_synth
+
+from visionbench.data.scan import ScanConfig
 
 _REPORT_LINES = pytest.StashKey[list[str]]()
 
@@ -10,6 +14,26 @@ _REPORT_LINES = pytest.StashKey[list[str]]()
 def report_line(request: pytest.FixtureRequest) -> Callable[[str], None]:
     """Append a line to the end-of-run summary (e.g. measured timings)."""
     return request.config.stash.setdefault(_REPORT_LINES, []).append
+
+
+@pytest.fixture
+def messy(tmp_path: Path) -> vb_synth.Fixture:
+    return vb_synth.build_messy(tmp_path / "src")
+
+
+@pytest.fixture
+def messy_config() -> ScanConfig:
+    return ScanConfig(max_image_pixels=vb_synth.SMALL_MAX_PIXELS)
+
+
+@pytest.fixture
+def balanced_src(tmp_path: Path) -> Path:
+    return vb_synth.build_balanced(tmp_path / "balanced")
+
+
+@pytest.fixture
+def make_images() -> Callable[..., None]:
+    return vb_synth.make_images
 
 
 def pytest_terminal_summary(

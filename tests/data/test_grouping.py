@@ -35,7 +35,9 @@ def test_uniform_images_not_grouped_despite_identical_hash(messy, messy_config) 
 
 
 def test_low_information_guard_std_and_degenerate_hash() -> None:
-    base = FileRecord("a/x.png", "a", "0" * 64, 1, 8, 8, "RGB", "PNG", format_hash(12345), 40.0)
+    base = FileRecord(
+        "a/x.png", "a", "0" * 64, 1, 8, 8, "RGB", "PNG", format_hash(0x0F0F_0F0F_0F0F_0F0F), 40.0
+    )
     assert not is_low_information(base, 3.0)
     assert is_low_information(replace(base, gray_std=2.9), 3.0)
     assert is_low_information(replace(base, dhash=format_hash(0)), 3.0)
@@ -63,8 +65,12 @@ def test_group_ids_stable_and_order_independent(messy, messy_config) -> None:
 
 
 def test_group_kind_mixed() -> None:
-    a = FileRecord("a/x.png", "a", "1" * 64, 1, 8, 8, "RGB", "PNG", format_hash(0x0F0F), 40.0)
+    a = FileRecord(
+        "a/x.png", "a", "1" * 64, 1, 8, 8, "RGB", "PNG", format_hash(0x0F0F_0F0F_0F0F_0F0F), 40.0
+    )
     copy = replace(a, relpath="a/x_copy.png")
-    near = replace(a, relpath="a/x_near.jpg", sha256="2" * 64, dhash=format_hash(0x0F0E))
+    near = replace(
+        a, relpath="a/x_near.jpg", sha256="2" * 64, dhash=format_hash(0x0F0F_0F0F_0F0F_0F0E)
+    )
     grouping = build_groups([a, copy, near], dhash_threshold=5, low_info_std=3.0)
     assert [g.kind for g in grouping.groups] == ["mixed"]

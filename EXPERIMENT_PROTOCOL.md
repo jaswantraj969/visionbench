@@ -54,14 +54,21 @@ This protocol governs all benchmarks. Status per section: **implemented (M1)**, 
 - **Near duplicates:** an in-house 64-bit dHash. Steps: grayscale, LANCZOS resize to 9×8, then
   per row 8 bits `pixel[x+1] > pixel[x]`, packed row-major with the MSB first. Two images are
   near duplicates if the Hamming distance is ≤ `dhash_threshold` (default **5**).
-- **Low-information guard:** an image is excluded from perceptual matching when either holds:
+- **Low-information guard:** an image is excluded from perceptual matching when any of these holds:
   - its grayscale standard deviation (0–255 scale, measured on a ≤256 px thumbnail) is below
     `low_info_std_threshold` (default **3.0**);
-  - its dHash is degenerate (all 0 or all 1 bits).
+  - its dHash is degenerate (all 0 or all 1 bits);
+  - its dHash popcount is below `low_info_popcount_min` (default **8**) or above
+    `low_info_popcount_max` (default **56**). This rule was added in M2.
 
   Such images are listed as `perceptual_check_skipped_low_information`. Exact matching still
   applies to them. Without this guard, distinct uniform images (e.g. blank sky or sea tiles), which
   all hash to `0x0`, would merge into one large false group.
+
+  The popcount rule catches smooth gradients. These have a high pixel std, so the std rule passes
+  them, but their hashes are sparse. In the test fixture, two different sky-like gradients have
+  std ≈ 38.6 and popcount 3, and sit 2 bits apart. Without the rule they form a false
+  cross-class group (`tests/data/test_lowinfo_verify.py`).
 - Pairwise comparison is vectorized: chunked NumPy XOR plus popcount, using `np.bitwise_count`
   when available, otherwise a 256-entry byte lookup table. Identical hashes are collapsed first.
 - Groups are the connected components (union-find) of exact plus near edges. Every image belongs to
@@ -74,12 +81,14 @@ This protocol governs all benchmarks. Status per section: **implemented (M1)**, 
   - Labels are never changed.
 - **Same-class duplicates** stay in the dataset, and their group is always assigned to one split.
 
-## 4. Splits (implemented, M1; algorithm `vb-split-v1`)
+## 4. Splits (implemented; algorithm `vb-split-v2` since M2)
 
 1. Rebuild duplicate groups from the stored per-file records, using this split's thresholds.
 2. Apply the conflict policy.
-3. For each class: sort its groups by `group_id`, then permute them with a NumPy `Generator`
-   seeded from `SeedSequence([seed, sha256(class name)[:8]])`.
+3. For each class: order its groups by `sha256(f"{seed}|{class}|{group_id}")`. This is pure
+   hashing, so the order does not depend on any RNG implementation or NumPy version. (`vb-split-v1`
+   in M1 used a NumPy `Generator` permutation instead. The algorithm string and `split_id` changed
+   accordingly.)
 4. Walk the groups in that order, giving each one to the split with the largest remaining deficit,
    where deficit = `fraction × class_total − assigned` (in images). Ties go to train, then val,
    then test.
@@ -126,12 +135,13 @@ Manifest fields:
   edits, overlays, and semantic near-duplicates (the same object photographed twice).
 - The threshold trades false positives (distinct but similar images merged) against false negatives.
   The default of 5/64 is a heuristic and has not been tuned on real data yet.
-- The low-information guard covers near-uniform images and exactly degenerate hashes. Low-texture
-  images with smooth gradients can still produce *sparse but non-zero* hashes that sit close to
-  each other. The default std threshold of 3.0 has not been calibrated on real data yet.
+- Low-information thresholds (std 3.0, popcount 8–56) are heuristics checked on synthetic images
+  only and are not calibrated on real photos. The popcount bounds also exclude genuinely
+  informative images whose hash happens to be sparse or dense. Those images still get exact
+  matching but lose near-duplicate detection.
 - Duplicate detection runs within one dataset only. Overlap with pretraining data (e.g. ImageNet)
   is not detected.
-- Split determinism depends on the NumPy `Generator` stream, which NumPy does not guarantee across
-  versions. The NumPy version is recorded in `split_info.json`.
+- Split assignment uses no RNG (`vb-split-v2`). The NumPy version is still recorded in
+  `split_info.json`.
 - GPU nondeterminism: some CUDA ops have no deterministic implementation, so `set_seed` warns
   rather than fails.

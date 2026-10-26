@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from conftest import encode, synthetic_image
+from vb_synth import encode, synthetic_image
 
 from visionbench.core.errors import DatasetExistsError, DatasetNotFoundError, DatasetValidationError
 from visionbench.core.jsonio import read_json

@@ -62,7 +62,8 @@ def _print_report_summary(report: dict[str, Any]) -> None:
     print(
         f"  perceptual check skipped (low information): "
         f"{dup['perceptual_check_skipped_low_information']['count']} "
-        f"(std < {dup['low_info_std_threshold']} or degenerate dHash; "
+        f"(std < {dup['low_info_std_threshold']}, degenerate dHash, or popcount outside "
+        f"[{dup.get('low_info_popcount_min', 0)}, {dup.get('low_info_popcount_max', 64)}]; "
         f"dHash threshold {dup['dhash_threshold']})"
     )
 
@@ -77,6 +78,8 @@ def _cmd_dataset_import(args: argparse.Namespace) -> int:
         min_images_per_class=_pick(args.min_images_per_class, s.min_images_per_class),
         dhash_threshold=_pick(args.dhash_threshold, s.dhash_threshold),
         low_info_std=_pick(args.low_info_std, s.low_info_std_threshold),
+        low_info_popcount_min=_pick(args.low_info_popcount_min, s.low_info_popcount_min),
+        low_info_popcount_max=_pick(args.low_info_popcount_max, s.low_info_popcount_max),
         samples_per_class=s.report_samples_per_class,
     )
     result = import_dataset(Path(args.src), args.name, s.data_dir("datasets"), config)
@@ -106,6 +109,21 @@ def _cmd_dataset_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_dataset_verify(args: argparse.Namespace) -> int:
+    from visionbench.data.store import verify_dataset
+
+    result = verify_dataset(_settings().data_dir("datasets"), args.dataset_id, full=args.full)
+    mode = "full (sizes + sha256)" if args.full else "fast (existence + sizes + fingerprint)"
+    print(f"verify {args.dataset_id}: {mode}; {result.files_checked} files checked")
+    if result.ok:
+        print("  OK: snapshot matches its records")
+        return 0
+    for relpath, problem in result.problems:
+        print(f"  MISMATCH {relpath}: {problem}")
+    print(f"  {len(result.problems)} problem(s) found", file=sys.stderr)
+    return 1
+
+
 def _cmd_dataset_list(_: argparse.Namespace) -> int:
     from visionbench.data.store import list_datasets
 
@@ -129,6 +147,8 @@ def _cmd_dataset_split(args: argparse.Namespace) -> int:
         fractions=tuple(args.fractions),
         dhash_threshold=_pick(args.dhash_threshold, s.dhash_threshold),
         low_info_std=_pick(args.low_info_std, s.low_info_std_threshold),
+        low_info_popcount_min=_pick(args.low_info_popcount_min, s.low_info_popcount_min),
+        low_info_popcount_max=_pick(args.low_info_popcount_max, s.low_info_popcount_max),
         conflict_policy=_pick(args.conflict_policy, s.conflict_policy),
         allow_missing_classes=args.allow_missing_classes,
     )
@@ -190,12 +210,19 @@ def build_parser() -> argparse.ArgumentParser:
     imp.add_argument("--min-images-per-class", type=int)
     imp.add_argument("--dhash-threshold", type=int)
     imp.add_argument("--low-info-std", type=float)
+    imp.add_argument("--low-info-popcount-min", type=int)
+    imp.add_argument("--low-info-popcount-max", type=int)
     imp.set_defaults(func=_cmd_dataset_import)
 
     rep = dsub.add_parser("report", parents=[common], help="show a dataset report")
     rep.add_argument("dataset_id")
     rep.add_argument("--json", action="store_true", help="print the full report.json")
     rep.set_defaults(func=_cmd_dataset_report)
+
+    ver = dsub.add_parser("verify", parents=[common], help="check a snapshot against its records")
+    ver.add_argument("dataset_id")
+    ver.add_argument("--full", action="store_true", help="also re-hash every file (SHA-256)")
+    ver.set_defaults(func=_cmd_dataset_verify)
 
     lst = dsub.add_parser("list", parents=[common], help="list imported datasets")
     lst.set_defaults(func=_cmd_dataset_list)
@@ -212,6 +239,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     spl.add_argument("--dhash-threshold", type=int)
     spl.add_argument("--low-info-std", type=float)
+    spl.add_argument("--low-info-popcount-min", type=int)
+    spl.add_argument("--low-info-popcount-max", type=int)
     spl.add_argument("--conflict-policy", choices=["exclude", "error"])
     spl.add_argument("--allow-missing-classes", action="store_true")
     spl.set_defaults(func=_cmd_dataset_split)

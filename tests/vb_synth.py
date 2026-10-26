@@ -1,18 +1,18 @@
-"""Programmatic dataset fixtures (no downloads, no committed binaries)."""
+"""Programmatic synthetic image datasets for tests and demos (no downloads, no binaries).
+
+Shared by all test directories (tests/ is on sys.path via the root conftest); fixtures that
+wrap these builders live in tests/conftest.py.
+"""
 
 from __future__ import annotations
 
 import io
 import os
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
-import pytest
 from PIL import Image, ImageDraw
-
-from visionbench.data.scan import ScanConfig
 
 IMG = 64  # side of regular fixture images
 SMALL_MAX_PIXELS = 10_000  # lowered limit used by the messy fixture (64*64 = 4096 passes)
@@ -155,29 +155,71 @@ def build_balanced(root: Path, per_class: int = 20, classes: int = 3, seed: int 
     return root
 
 
-@pytest.fixture
-def messy(tmp_path: Path) -> Fixture:
-    return build_messy(tmp_path / "src")
-
-
-@pytest.fixture
-def messy_config() -> ScanConfig:
-    return ScanConfig(max_image_pixels=SMALL_MAX_PIXELS)
-
-
-@pytest.fixture
-def balanced_src(tmp_path: Path) -> Path:
-    return build_balanced(tmp_path / "balanced")
-
-
-@pytest.fixture
-def make_images() -> Callable[..., None]:
+def make_images(folder: Path, count: int, seed: int = 0, prefix: str = "img") -> None:
     """Write ``count`` unique synthetic PNGs into ``folder`` (created if needed)."""
+    rng = np.random.default_rng(seed)
+    folder.mkdir(parents=True, exist_ok=True)
+    for i in range(count):
+        (folder / f"{prefix}_{i:03d}.png").write_bytes(encode(synthetic_image(rng)))
 
-    def _make(folder: Path, count: int, seed: int = 0, prefix: str = "img") -> None:
-        rng = np.random.default_rng(seed)
-        folder.mkdir(parents=True, exist_ok=True)
-        for i in range(count):
-            (folder / f"{prefix}_{i:03d}.png").write_bytes(encode(synthetic_image(rng)))
 
-    return _make
+def tilted_gradient(tilt: float, color: tuple[float, float, float], size: int = IMG) -> Image.Image:
+    """Smooth vertical gradient with a slight horizontal tilt (sky-like).
+
+    Its gray std is high (~38), so the std guard does not catch it, but its dHash is sparse
+    (tilt 1.1 -> popcount 3; tilt 1.2 -> 3, two bits apart from tilt 1.1).
+    """
+    yy, xx = np.mgrid[0:size, 0:size].astype(np.float64)
+    g = 40 + 160 * yy / size + tilt * xx / size
+    return Image.fromarray(np.clip(np.stack([g * c for c in color], -1), 0, 255).astype(np.uint8))
+
+
+def near_flat_noise(seed: int, sd: float = 1.5, size: int = IMG) -> Image.Image:
+    """Uniform gray plus faint noise: gray std ~1, dHash popcount ~15 (noise-driven bits)."""
+    rng = np.random.default_rng(seed)
+    arr = 128 + rng.normal(0, sd, (size, size, 3))
+    return Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
+
+
+def build_low_info(root: Path, seed: int = 7) -> Path:
+    """Two classes with normal images plus two smooth gradients (one per class) and a
+    near-flat noisy image. Without the popcount guard the gradients form a cross-class group."""
+    make_images(root / "sky", 3, seed=seed)
+    make_images(root / "sea", 3, seed=seed + 1)
+    (root / "sky" / "gradient_a.png").write_bytes(encode(tilted_gradient(1.1, (1.0, 0.8, 0.6))))
+    (root / "sea" / "gradient_b.png").write_bytes(encode(tilted_gradient(1.2, (0.6, 0.8, 1.0))))
+    (root / "sky" / "flat_noise.png").write_bytes(encode(near_flat_noise(seed)))
+    return root
+
+
+SHAPES = ("circle", "square", "triangle")
+
+
+def shape_image(rng: np.random.Generator, shape: str, size: int = IMG) -> Image.Image:
+    """A filled shape with random size, position and colors on a noisy random background."""
+    bg = tuple(int(c) for c in rng.integers(0, 256, 3))
+    img = Image.new("RGB", (size, size), bg)
+    arr = np.asarray(img, dtype=np.float64) + rng.normal(0, 10, (size, size, 3))
+    img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
+    draw = ImageDraw.Draw(img)
+    r = int(rng.integers(size // 6, size // 3))
+    cx, cy = (int(v) for v in rng.integers(r + 2, size - r - 2, 2))
+    fg = tuple(int((b + rng.integers(90, 166)) % 256) for b in bg)  # contrast with background
+    if shape == "circle":
+        draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=fg)
+    elif shape == "square":
+        draw.rectangle([cx - r, cy - r, cx + r, cy + r], fill=fg)
+    else:
+        draw.polygon([(cx, cy - r), (cx - r, cy + r), (cx + r, cy + r)], fill=fg)
+    return img
+
+
+def build_shapes(root: Path, per_class: int, seed: int = 0, size: int = IMG) -> Path:
+    """Learnable synthetic dataset: one class per shape in :data:`SHAPES`."""
+    rng = np.random.default_rng(seed)
+    for shape in SHAPES:
+        d = root / shape
+        d.mkdir(parents=True, exist_ok=True)
+        for i in range(per_class):
+            (d / f"{shape}_{i:04d}.png").write_bytes(encode(shape_image(rng, shape, size)))
+    return root

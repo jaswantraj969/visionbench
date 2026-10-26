@@ -50,9 +50,31 @@ class Grouping:
         return [g for g in self.groups if g.conflict]
 
 
-def is_low_information(record: FileRecord, low_info_std: float) -> bool:
-    """Near-uniform images (gray std below threshold) or a degenerate all-0/all-1 dHash."""
-    return record.gray_std < low_info_std or record.dhash_int in (0, ALL_ONES)
+DEFAULT_POPCOUNT_MIN = 8
+DEFAULT_POPCOUNT_MAX = 56
+
+
+def is_low_information(
+    record: FileRecord,
+    low_info_std: float,
+    popcount_min: int = DEFAULT_POPCOUNT_MIN,
+    popcount_max: int = DEFAULT_POPCOUNT_MAX,
+) -> bool:
+    """True if the dHash carries too little information for perceptual matching.
+
+    Any of: near-uniform pixels (gray std below threshold); a degenerate all-0/all-1 hash; or a
+    hash with fewer than ``popcount_min`` / more than ``popcount_max`` set bits. Smooth
+    gradients pass the std test but give such sparse/dense hashes, which then sit within a few
+    bits of each other and would form false groups.
+    """
+    h = record.dhash_int
+    popcount = h.bit_count()
+    return (
+        record.gray_std < low_info_std
+        or h in (0, ALL_ONES)
+        or popcount < popcount_min
+        or popcount > popcount_max
+    )
 
 
 def make_group_id(members: Sequence[str]) -> str:
@@ -78,7 +100,12 @@ class _UnionFind:
 
 
 def build_groups(
-    records: Sequence[FileRecord], *, dhash_threshold: int, low_info_std: float
+    records: Sequence[FileRecord],
+    *,
+    dhash_threshold: int,
+    low_info_std: float,
+    popcount_min: int = DEFAULT_POPCOUNT_MIN,
+    popcount_max: int = DEFAULT_POPCOUNT_MAX,
 ) -> Grouping:
     records = sorted(records, key=lambda r: r.relpath)
     uf = _UnionFind(len(records))
@@ -87,7 +114,11 @@ def build_groups(
     for i, r in enumerate(records):
         uf.union(first_by_sha.setdefault(r.sha256, i), i)
 
-    low_info = [i for i, r in enumerate(records) if is_low_information(r, low_info_std)]
+    low_info = [
+        i
+        for i, r in enumerate(records)
+        if is_low_information(r, low_info_std, popcount_min, popcount_max)
+    ]
     low_info_set = set(low_info)
     eligible = np.array([i for i in range(len(records)) if i not in low_info_set], dtype=np.int64)
     hashes = np.array([records[i].dhash_int for i in eligible], dtype=np.uint64)

@@ -4,8 +4,8 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from conftest import SMALL_MAX_PIXELS, encode, synthetic_image, try_dir_link
 from PIL import Image
+from vb_synth import SMALL_MAX_PIXELS, encode, synthetic_image, try_dir_link
 
 from visionbench.core.errors import DatasetValidationError
 from visionbench.data.records import IssueCategory

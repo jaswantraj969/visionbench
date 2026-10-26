@@ -69,6 +69,8 @@ def build_report(
         "duplicates": {
             "dhash_threshold": config.dhash_threshold,
             "low_info_std_threshold": config.low_info_std,
+            "low_info_popcount_min": config.low_info_popcount_min,
+            "low_info_popcount_max": config.low_info_popcount_max,
             "groups_total": len(grouping.groups),
             "multi_member_groups": len(multi),
             "files_in_multi_member_groups": sum(len(g.members) for g in multi),

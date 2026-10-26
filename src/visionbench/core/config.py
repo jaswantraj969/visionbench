@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     min_images_per_class: int = Field(default=3, ge=1)
     dhash_threshold: int = Field(default=5, ge=0, le=64)
     low_info_std_threshold: float = Field(default=3.0, ge=0)
+    low_info_popcount_min: int = Field(default=8, ge=0, le=64)
+    low_info_popcount_max: int = Field(default=56, ge=0, le=64)
     report_samples_per_class: int = Field(default=8, ge=0)
     conflict_policy: Literal["exclude", "error"] = "exclude"
 

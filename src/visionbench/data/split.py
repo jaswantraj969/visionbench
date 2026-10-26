@@ -1,14 +1,17 @@
 """Duplicate-group-aware, class-stratified train/val/test splits.
 
-Algorithm ``vb-split-v1``:
+Algorithm ``vb-split-v2``:
 1. Rebuild duplicate groups from the stored file records with this split's thresholds.
 2. Label-conflict groups (members with different labels) are excluded ("exclude") or abort the
    split ("error"). They are never relabelled.
-3. Per class: sort its groups by group_id, permute them with a Generator derived from
-   (seed, class name), then give each group, in that order, to the split with the largest
-   remaining deficit ``target - assigned`` (in images). Ties go train, then val, then test.
-   Targets use exact rational arithmetic, so tie-breaking is platform-independent.
+3. Per class: order its groups by ``sha256(f"{seed}|{class}|{group_id}")`` (pure hashing, so the
+   order does not depend on any RNG implementation or library version), then give each group, in
+   that order, to the split with the largest remaining deficit ``target - assigned`` (in images).
+   Ties go train, then val, then test. Targets use exact rational arithmetic, so tie-breaking is
+   platform-independent.
 4. Leakage is computed from the final entries, not assumed.
+
+``vb-split-v1`` (M1) used a NumPy Generator permutation instead of step 3's hash order.
 """
 
 from __future__ import annotations
@@ -30,12 +33,11 @@ import numpy as np
 from visionbench import __version__
 from visionbench.core.errors import SplitError
 from visionbench.core.jsonio import canonical_json_bytes, write_json
-from visionbench.core.seeding import derived_rng
 from visionbench.data.grouping import DuplicateGroup, build_groups
 from visionbench.data.records import FileRecord, compute_fingerprint
 from visionbench.data.store import dataset_dir, load_dataset, load_records
 
-ALGORITHM = "vb-split-v1"
+ALGORITHM = "vb-split-v2"
 SPLIT_NAMES = ("train", "val", "test")
 CONFLICT_POLICIES = ("exclude", "error")
 MANIFEST_FORMAT_VERSION = 1
@@ -47,6 +49,8 @@ class SplitConfig:
     fractions: tuple[float, float, float] = (0.7, 0.15, 0.15)
     dhash_threshold: int = 5
     low_info_std: float = 3.0
+    low_info_popcount_min: int = 8
+    low_info_popcount_max: int = 56
     conflict_policy: str = "exclude"
     allow_missing_classes: bool = False
 
@@ -63,6 +67,8 @@ class SplitConfig:
             raise SplitError("dhash_threshold must be in [0, 64]")
         if self.low_info_std < 0:
             raise SplitError("low_info_std must be >= 0")
+        if not 0 <= self.low_info_popcount_min <= self.low_info_popcount_max <= 64:
+            raise SplitError("need 0 <= low_info_popcount_min <= low_info_popcount_max <= 64")
         if self.conflict_policy not in CONFLICT_POLICIES:
             raise SplitError(f"conflict_policy must be one of {CONFLICT_POLICIES}")
 
@@ -76,6 +82,8 @@ class SplitConfig:
             "fractions": [float(f) for f in self.fractions],
             "dhash_threshold": self.dhash_threshold,
             "low_info_std_threshold": float(self.low_info_std),
+            "low_info_popcount_min": self.low_info_popcount_min,
+            "low_info_popcount_max": self.low_info_popcount_max,
             "conflict_policy": self.conflict_policy,
             "allow_missing_classes": self.allow_missing_classes,
         }
@@ -95,17 +103,20 @@ def make_split_id(fingerprint: str, config: SplitConfig) -> str:
     return "sp-" + hashlib.sha256(canonical_json_bytes(key)).hexdigest()[:12]
 
 
+def group_order_key(seed: int, label: str, group_id: str) -> str:
+    return hashlib.sha256(f"{seed}|{label}|{group_id}".encode()).hexdigest()
+
+
 def assign_class_groups(
     groups: list[DuplicateGroup], fractions: list[Fraction], seed: int, label: str
 ) -> tuple[dict[str, str], list[int], list[Fraction]]:
     """Assign one class's groups; return (group_id -> split, achieved counts, targets)."""
-    ordered = sorted(groups, key=lambda g: g.group_id)
+    ordered = sorted(groups, key=lambda g: group_order_key(seed, label, g.group_id))
     total = sum(len(g.members) for g in ordered)
     targets = [f * total for f in fractions]
     assigned = [0, 0, 0]
     assignment: dict[str, str] = {}
-    for idx in derived_rng(seed, label).permutation(len(ordered)):
-        group = ordered[int(idx)]
+    for group in ordered:
         deficits = [targets[k] - assigned[k] for k in range(3)]
         best = 0  # strict ">" keeps the earliest split on ties: train, val, test
         for k in (1, 2):
@@ -120,7 +131,11 @@ def compute_manifest(
     records: list[FileRecord], *, dataset_id: str, fingerprint: str, config: SplitConfig
 ) -> dict[str, Any]:
     grouping = build_groups(
-        records, dhash_threshold=config.dhash_threshold, low_info_std=config.low_info_std
+        records,
+        dhash_threshold=config.dhash_threshold,
+        low_info_std=config.low_info_std,
+        popcount_min=config.low_info_popcount_min,
+        popcount_max=config.low_info_popcount_max,
     )
     conflicts = grouping.conflicts
     if conflicts and config.conflict_policy == "error":

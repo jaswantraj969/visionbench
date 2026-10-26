@@ -41,6 +41,8 @@ class ScanConfig:
     min_images_per_class: int = 3
     dhash_threshold: int = 5
     low_info_std: float = 3.0
+    low_info_popcount_min: int = 8
+    low_info_popcount_max: int = 56
     samples_per_class: int = 8
     sample_seed: int = 0
 
@@ -53,6 +55,10 @@ class ScanConfig:
             raise DatasetValidationError("dhash_threshold must be in [0, 64]")
         if self.low_info_std < 0:
             raise DatasetValidationError("low_info_std must be >= 0")
+        if not 0 <= self.low_info_popcount_min <= self.low_info_popcount_max <= 64:
+            raise DatasetValidationError(
+                "need 0 <= low_info_popcount_min <= low_info_popcount_max <= 64"
+            )
         if self.samples_per_class < 0:
             raise DatasetValidationError("samples_per_class must be >= 0")
 

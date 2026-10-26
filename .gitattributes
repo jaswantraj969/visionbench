@@ -1,0 +1,11 @@
+* text=auto eol=lf
+
+# Binary files: never normalize line endings or diff as text
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.bmp binary
+*.webp binary
+*.pt binary
+*.pth binary
+*.zip binary
