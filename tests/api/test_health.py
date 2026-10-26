@@ -1,3 +1,4 @@
+import logging
 import sys
 from pathlib import Path
 
@@ -28,17 +29,21 @@ def test_ready_with_writable_data_root(tmp_path: Path) -> None:
     assert not any(p.name.startswith(".write-probe-") for p in root.rglob("*"))
 
 
-def test_ready_with_unwritable_data_root(tmp_path: Path) -> None:
+def test_ready_with_unwritable_data_root(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     # A path beneath a regular file can never be created as a directory, on any OS
     # (directory chmod is not enforced on Windows, so permissions are not used here).
     blocker = tmp_path / "blocker"
     blocker.write_text("not a directory")
-    r = _client(blocker / "var").get("/api/ready")
+    with caplog.at_level(logging.ERROR, logger="visionbench.api.main"):
+        r = _client(blocker / "var").get("/api/ready")
     assert r.status_code == 503
     body = r.json()
-    assert set(body) == {"error"}
-    assert body["error"]["code"] == "not_ready"
-    assert "not writable" in body["error"]["message"]
+    assert body == {"error": {"code": "not_ready", "message": "data root is not writable"}}
+    # No filesystem paths leak to clients; the full path is logged server-side instead.
+    assert str(tmp_path) not in r.text
+    assert str(tmp_path.resolve()).replace("\\", "\\\\") not in r.text
+    assert "blocker" not in r.text
+    assert str((blocker / "var").resolve()) in caplog.text
 
 
 def test_ready_when_torch_import_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

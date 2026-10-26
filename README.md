@@ -14,9 +14,12 @@ M0 (foundation only)**. See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for
 There is **no** dataset handling, training, evaluation, explainability, robustness, or
 frontend yet.
 
-## Setup (verified on Windows 11, Python 3.11.15)
+## Setup
 
-Requires Python 3.11–3.13. Install PyTorch from the official wheel index first, then the package.
+Tested on Python 3.11 (Windows 11). `pyproject.toml` declares `>=3.11,<3.14`, but 3.12 and 3.13
+have not been tested. Install PyTorch from the official wheel index first, then the package.
+The exact versions of the verified local CUDA environment are in
+[requirements/lock-dev-cu130.txt](requirements/lock-dev-cu130.txt).
 
 ```powershell
 python -m venv .venv

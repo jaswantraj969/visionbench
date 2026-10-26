@@ -27,14 +27,18 @@ def error_response(status_code: int, code: str, message: str) -> JSONResponse:
 
 
 def check_data_root(settings: Settings) -> str | None:
-    """Return ``None`` if data_root and its subdirs are writable, else a reason string."""
+    """Return ``None`` if data_root and its subdirs are writable, else a generic reason.
+
+    The reason is returned to clients, so it never contains paths; details are logged.
+    """
     try:
         dirs = settings.ensure_data_dirs()
         for path in dirs.values():
             with tempfile.NamedTemporaryFile(dir=path, prefix=".write-probe-"):
                 pass
     except OSError as exc:
-        return f"data_root {settings.resolved_data_root} is not writable: {exc}"
+        logger.error("data root %s is not writable: %s", settings.resolved_data_root, exc)
+        return "data root is not writable"
     return None
 
 
