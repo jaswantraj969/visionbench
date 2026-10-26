@@ -110,27 +110,86 @@ Manifest fields:
 - Metadata: `config`, per-class `counts` and `target_counts`, `split_totals`, `excluded`,
   `warnings`, `leakage_check`, `algorithm`, `visionbench_version`, `dataset_fingerprint`.
 
-## 5. Seeds (partly implemented)
-- `set_seed()` (M0) seeds Python, NumPy and torch. Split and report sampling use `derived_rng`
-  (seed + SHA-256 of a key), never Python's salted `hash()`.
-- Every training run must record its seed, the `set_seed()` report, and `env_info` (planned, M2).
-- Bitwise reproducibility is only claimed for identical hardware and software versions.
+## 5. Seeds and determinism (implemented, M2)
+Each training run does the following before building the model:
+- sets `CUBLAS_WORKSPACE_CONFIG=:4096:8`, before any cuBLAS work;
+- calls `set_seed(seed)`, which seeds Python `random`, NumPy, and torch (CPU and all CUDA devices)
+  and sets `cudnn.deterministic=True` and `cudnn.benchmark=False`;
+- calls `torch.use_deterministic_algorithms(True)` in **strict** mode, so an op without a
+  deterministic implementation raises instead of warning.
 
-## 6. Model selection (planned)
-- Hyperparameters, checkpoint selection and early stopping use the **validation split only**.
-- The **test split is evaluated once** per final model, for final reporting. Test results never feed
-  back into any choice.
+The DataLoader shuffle uses its own `torch.Generator` seeded with the run seed. Workers get a
+`worker_init_fn` that seeds NumPy and `random`; the default is 0 workers on Windows. Random
+augmentations draw from the torch RNG in the main process (0 workers), so they follow the seed. The
+seed, the `set_seed` report and `env_info` (including device and GPU name) are stored in `env.json`
+and in the experiment row.
 
-## 7. Preprocessing (planned)
-- Models trained from scratch normalize with statistics computed on the **train split only**.
-- Pretrained models use their weights' normalization (recorded).
-- Input resolution is recorded per model (e.g. 224×224 for ResNet18 and EfficientNet-B0).
-- Training augmentation is recorded; evaluation uses deterministic transforms.
+What has been verified, and only this:
+- **CPU:** two identical runs give identical per-epoch metrics and identical `best.pt` tensors.
+  This is enforced by a test.
+- **CUDA:** for the M2 demo, `small_cnn` at 64 px, 15 epochs on an RTX 3050 6GB with
+  torch 2.14.1+cu130, two identical runs in separate processes gave bitwise-identical histories and
+  `best.pt` tensors. This is a single observation for one configuration. It is not a guarantee for
+  other models, GPUs, drivers, or library versions, and it is not covered by the test suite.
 
-## 8. Baselines (planned)
-- A majority-class baseline is reported with every comparison.
+Limits:
+- The CPU and CUDA results of the same configuration differ, because they use different kernels.
+- `num_workers > 0` has not been checked for determinism.
+- AMP (`amp: true`, CUDA only) has not been tested and may break determinism.
+- Ops that lack deterministic CUDA kernels make the run fail, with the error recorded.
 
-## 9. Known limitations
+## 6. Model selection (implemented, M2; test evaluation is M3)
+- Training builds data loaders for **train** and **val** only. Every access to manifest entries
+  goes through `training.data.select_entries`, which rejects any other split name. A test patches the
+  image loader and asserts that no test-split file is ever opened during a full training run.
+- Early stopping and best-checkpoint selection use **validation metrics only**: `val_loss`
+  (default, unweighted mean cross-entropy) or `val_balanced_accuracy`, with `patience` and
+  `min_delta`. `best.pt` is the epoch with the best monitored value, and its epoch is recorded.
+- The **test split is evaluated once** per final model, for final reporting (M3). Test results never
+  feed back into any choice.
+
+## 7. Preprocessing (implemented, M2)
+- **Pretrained weights:** use the weights' own transform. ResNet18: resize 256 (bilinear), then
+  center-crop 224. EfficientNet-B0: resize 256 (**bicubic**), then center-crop 224. Both use ImageNet
+  mean/std. The exact values are recorded in `config.json`. Overriding the input size of a
+  pretrained model is an error.
+- **Scratch models:** resize to `input_size × input_size` (bilinear) and normalize with per-channel
+  mean/std computed on the **train split only**. The statistics use the model's resolution and no
+  augmentation. They are cached next to the manifest as `norm_stats_train_<N>px.json`, keyed by
+  resolution and a fingerprint of the train relpaths and hashes, and recorded in `config.json`.
+  Tests check that the stats do not change when only val/test change, and do change when train
+  changes.
+- **Augmentation (train only):** default `RandomResizedCrop(scale 0.8–1.0)` plus horizontal flip.
+  Validation transforms are deterministic. Both transform lists are recorded.
+- **Class-weighted loss** (optional) uses `N / (K · n_c)` from **train counts only**.
+- **Resolution confound:** `input_size` is recorded for every run (SmallCNN default 64, torchvision
+  models 224). Comparisons across models at different resolutions confound architecture with input
+  resolution, and M3 comparison reports must flag this.
+
+## 8. Pretrained weight policy (implemented, M2)
+- Weights come only from torchvision's weights API. They are downloaded through torch.hub into
+  `<data_root>/cache/torch/checkpoints/` with `check_hash=True`, and loaded with
+  `weights_only=True`.
+- The file's SHA-256 must start with the hash prefix in its file name. The weights enum name, file
+  path and SHA-256 are recorded in `config.json` and in the experiment row.
+- If weights cannot be obtained, training **fails** with a clear message by default. Only with
+  `--allow-weight-fallback` does it train from scratch instead. Then `weights="scratch"` is recorded
+  everywhere, the reason is recorded, and `train.log` contains a `WEIGHT FALLBACK` warning. There is
+  never a silent fallback.
+- `finetune: head_only` freezes all parameters except the classifier head. BatchNorm running
+  statistics in the frozen backbone still update in train mode.
+
+## 9. Baselines
+- The majority-class baseline (implemented, M2) predicts the most frequent **train** class. Its
+  probabilities are the train priors. It is saved as JSON and opens no images.
+- It must be reported with every comparison (M3).
+
+## 10. Synthetic sanity checks are not benchmarks
+The M2 demos use a generated shapes dataset to show that the pipeline learns. Their numbers are
+**pipeline sanity checks on synthetic data, not benchmark results**, and must never be cited as
+model performance.
+
+## 11. Known limitations
 - dHash finds resizes and re-encodes. It **misses** crops, rotations, flips, heavy color or contrast
   edits, overlays, and semantic near-duplicates (the same object photographed twice).
 - The threshold trades false positives (distinct but similar images merged) against false negatives.
@@ -143,5 +202,8 @@ Manifest fields:
   is not detected.
 - Split assignment uses no RNG (`vb-split-v2`). The NumPy version is still recorded in
   `split_info.json`.
-- GPU nondeterminism: some CUDA ops have no deterministic implementation, so `set_seed` warns
-  rather than fails.
+- GPU determinism has been observed for only one configuration (§5). `set_seed` alone uses
+  `warn_only=True`, but training enables strict mode.
+- Balanced accuracy averages recall over the classes **present in val**. A class with no val images
+  is left out of the mean.
+- The majority baseline floors zero priors at 1e-12 when computing loss.

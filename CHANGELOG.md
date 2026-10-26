@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased: M2 model registry, training, tracking (2026-10-27)
+
+### Added
+- `visionbench.models`:
+  - majority baseline (train priors, JSON);
+  - SmallCNN (Grad-CAM target `features.block4.conv`);
+  - ResNet18 and EfficientNet-B0 with scratch or ImageNet weights and full or head_only fine-tuning
+    (target layers `layer4` / `features.8`, metadata only).
+- Pretrained weights are fetched via torch.hub into `<data_root>/cache/torch`, loaded with
+  `weights_only=True`, sha256 recorded and checked against the file-name hash. Training fails
+  unless `--allow-weight-fallback` is given.
+- `visionbench.training`:
+  - YAML/Pydantic config with CLI overrides;
+  - train/val-only loader factory;
+  - train-only normalization stats (cached per split and resolution);
+  - train-only augmentation and class weights;
+  - val-only early stopping and best checkpoint;
+  - strict deterministic algorithms with `CUBLAS_WORKSPACE_CONFIG`;
+  - run directory and status handling (completed/failed/cancelled).
+- `visionbench.tracking`: SQLite experiment store (SQLAlchemy) with `experiments`,
+  `epoch_metrics`, `artifacts` and `schema_version` tables.
+- CLI: `visionbench train`, `visionbench experiments list|show`.
+- Dependencies: `sqlalchemy` (new, the planned DB layer); `pyyaml` declared (it was already
+  installed via `uvicorn[standard]`).
+- Tests: model registry, overfit sanity, 4-model smoke, test-split isolation, CPU determinism,
+  train-only norm stats and class weights, early stopping, failure/cancel paths, fingerprint and
+  tamper aborts, checkpoint reload, weight fallback, config and CLI.
+
+### Changed (M2 step 0)
+- Splits are `vb-split-v2`: groups are ordered by `sha256(seed|class|group_id)`, with no RNG.
+  `split_id`s differ from v1.
+- Low-information guard: a dHash popcount < 8 or > 56 (configurable) is also excluded from
+  perceptual matching.
+- `.gitattributes` (LF, binary rules). Test builders moved to `tests/vb_synth.py`.
+
+### Added (M2 step 0)
+- `visionbench dataset verify <id> [--full]`.
+
 ## Unreleased: M1 dataset layer (2026-10-27)
 
 ### Added

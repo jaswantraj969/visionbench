@@ -11,14 +11,14 @@ done only when every acceptance criterion has been demonstrated by commands exec
 - ruff clean; tests cover config, seed reproducibility, health, ready (writable and unwritable data root).
 - Continuity files present; CI workflow file present (validated later).
 
-## M1 — Dataset ingestion & validation (implemented; pending review)
+## M1 — Dataset ingestion & validation (done; follow-ups in M2 step 0)
 - Import an image-folder dataset (class-per-directory) into the data root; reject corrupt/unsupported files with a per-file report.
 - Statistics: class counts, image size / mode distribution, corrupt-file list.
 - Duplicate groups: exact (SHA-256) and near (perceptual hash, documented threshold); label-conflict groups flagged.
 - Group-aware stratified train/val/test splits: a whole duplicate group goes to one split; class proportions within a stated tolerance; deterministic given a seed.
 - Versioned JSON manifest (files, hashes, labels, split, group IDs); tests prove no group leaks across splits.
 
-## M2 — Model registry & training (CLI)
+## M2 — Model registry & training (CLI) (implemented; pending review)
 - Registry: majority-class baseline, SmallCNN, ResNet18, EfficientNet-B0 (pretrained optional, recorded).
 - `visionbench train` with config file + seed; checkpoints under `artifacts/`; early stopping and model selection on validation only.
 - Run record: config, seed report, env info, manifest hash, per-epoch metrics.
