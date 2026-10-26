@@ -1,0 +1,29 @@
+# Runtime data (datasets, checkpoints, artifacts, db)
+var/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# Model weights / checkpoints
+*.pt
+*.pth
+*.ckpt
+
+# Frontend (later milestone)
+node_modules/
+
+# Secrets
+.env
+
+# Coverage
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
