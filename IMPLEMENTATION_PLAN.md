@@ -20,7 +20,7 @@ done only when every acceptance criterion has been demonstrated by commands exec
 
 ## M2 — Model registry & training (CLI) (implemented; pending review)
 - Registry: majority-class baseline, SmallCNN, ResNet18, EfficientNet-B0 (pretrained optional, recorded).
-- `visionbench train` with config file + seed; checkpoints under `artifacts/`; early stopping and model selection on validation only.
+- `visionbench train` with config file + seed; checkpoints under `experiments/<exp_id>/checkpoints/`; early stopping and model selection on validation only.
 - Run record: config, seed report, env info, manifest hash, per-epoch metrics.
 - Tests: tiny synthetic dataset trains end-to-end on CPU; same seed → same metrics on same machine.
 
