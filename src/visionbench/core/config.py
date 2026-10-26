@@ -9,7 +9,7 @@ from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-DATA_SUBDIRS = ("datasets", "artifacts", "db")
+DATA_SUBDIRS = ("datasets", "artifacts", "db", "experiments", "cache")
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
