@@ -1,7 +1,7 @@
 # VisionBench
 
 Reproducible computer-vision benchmarking and explainability platform. **Current state: milestone
-M2 (model registry, CLI training, experiment tracking)**. See
+M3 (evaluation, test-use accounting, model comparison)**. See
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for what comes next.
 
 ## What exists now
@@ -21,8 +21,11 @@ M2 (model registry, CLI training, experiment tracking)**. See
   `experiments list|show`.
 - Tests (pytest) and lint (ruff).
 
-There is **no** test-set evaluation (M3), explainability, robustness, API job runner, or frontend
-yet.
+- `visionbench.evaluation`: the only code that reads test images. It provides metrics with
+  explicit undefined values, bootstrap CIs, latency, test-use accounting, and comparison reports
+  with confound flags.
+
+There is **no** explainability, robustness, API job runner, or frontend yet.
 
 ## Setup
 
@@ -141,6 +144,29 @@ num_workers: 0
   records `weights=scratch`.
 - Synthetic demo results are **pipeline sanity checks on synthetic data, not benchmark results**.
   See [REVIEW_PACKET.md](REVIEW_PACKET.md).
+
+## Evaluation and comparison
+
+```powershell
+.\.venv\Scripts\visionbench.exe evaluate exp-... --split test --device cpu        # val-selected best.pt
+.\.venv\Scripts\visionbench.exe evaluate exp-... --split val --device cuda
+.\.venv\Scripts\visionbench.exe evaluate exp-... --split test --checkpoint last   # recorded as 'last'
+.\.venv\Scripts\visionbench.exe evaluations list [exp-...]
+.\.venv\Scripts\visionbench.exe compare exp-A exp-B exp-C --split test --note "..."
+```
+
+- `evaluate` writes
+  `<data_root>/experiments/<exp>/evaluations/<eval_id>/{metrics.json, predictions.csv,
+  confusion_matrix.json, efficiency.json}`.
+- Undefined metrics are `null` with a reason, never 0.
+- CIs are 95% percentile bootstrap (default 1000 resamples, `--bootstrap`, `--seed`).
+- Latency is forward-pass only, on the evaluation device; `--no-latency` skips it.
+- Every test evaluation is recorded. Repeating one prints a warning with the count, and the
+  count appears in every report.
+- `compare` needs an existing evaluation of each experiment on the chosen split. It refuses
+  experiments on different datasets or splits, and writes
+  `<data_root>/reports/<report_id>/comparison.{json,md}`.
+- Ranking uses validation metrics only, and test results get no winner label.
 
 ## Run tests and lint
 

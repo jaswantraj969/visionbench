@@ -1,52 +1,55 @@
 # Project Status
 
-_Last updated: 2026-10-27, end of M2 (pending supervisor review)._
+_Last updated: 2026-10-27, end of M3 (pending supervisor review)._
 
 ## Current state
 - **M0:** foundation (config, seeding, env info, health/ready API).
 - **M1 (+ M2 step 0):** dataset layer.
-  - Import, validation, stats, duplicate groups (with the popcount low-information guard).
-  - `vb-split-v2` hash-ordered leakage-aware splits.
-  - `dataset verify [--full]`.
-- **M2:** model registry (majority baseline, SmallCNN, ResNet18, EfficientNet-B0), CLI training
-  from split manifests (train/val only), checkpoints, and a SQLite experiment store with
-  `experiments list|show`.
-- There is no test-set evaluation (M3), no API endpoints beyond health/ready, no job runner,
-  Grad-CAM, robustness, or frontend.
+  - Import, validation, stats, duplicate groups with the popcount low-information guard.
+  - `vb-split-v2` splits.
+  - `dataset verify`.
+- **M2 (+ M3 step 0):**
+  - model registry;
+  - CLI training (train/val only), checkpoints, SQLite tracking;
+  - configurable torch hub dir; frozen BatchNorm for head_only;
+  - norm-stats cache under `cache/norm_stats/`, so split directories are write-once.
+- **M3:**
+  - `evaluate`, the only code path that reads test images (val/test, never train);
+  - metrics with explicit undefined values (null + reason);
+  - bootstrap and paired-bootstrap CIs;
+  - forward-pass latency;
+  - test-use accounting (`evaluations` table, warnings, counts in reports);
+  - `compare` reports with VAL-only ranking and confound flags.
+- There are no API endpoints beyond health/ready, no job runner, Grad-CAM, robustness, or
+  frontend.
 
-## Verified in session (2026-10-27, Windows 11, Python 3.11.15, torch 2.14.1+cu130, RTX 3050 6GB)
+## Verified in session (2026-10-27, Windows 11, Python 3.11.15, torch 2.14.1+cu130, scikit-learn 1.9.1, RTX 3050 6GB)
 - `ruff check .` and `ruff format --check .` pass.
-- `pytest -q --cov=visionbench`: 140 passed and 1 skipped (file symlink), total coverage 96%. The
-  same result holds with `CUDA_VISIBLE_DEVICES=-1`, where in-process
-  `torch.cuda.is_available()=False`.
-- **Test isolation:** a full training run, with the image loader patched, opens no test-split
-  image, and the loader factory rejects `"test"`.
-- **CPU determinism:** two identical runs give identical per-epoch metrics and identical `best.pt`
-  tensors (test).
-- **CUDA determinism (demo, one configuration):** two `small_cnn` runs in separate processes were
-  bitwise identical (max abs per-epoch difference 0; 26/26 `best.pt` tensors equal).
-- **Synthetic shapes demo (pipeline sanity checks on synthetic data, not benchmark results):**
-  best-epoch val balanced accuracy was
-  - majority baseline 0.3333;
-  - small_cnn CPU 1.0000;
-  - small_cnn CUDA 1.0000;
-  - resnet18 (ImageNet, 2 epochs) 1.0000;
-  - efficientnet_b0 (ImageNet, 2 epochs) 0.8519.
-- **Pretrained weights:** downloaded into `<data_root>/cache/torch` (re-downloaded, because the
-  earlier copies were in `~/.cache`). Recorded sha256 values match the files and the hash prefixes
-  in their names.
+- `pytest -q --cov=visionbench`: 174 passed and 1 skipped (file symlink), coverage 95%. The same
+  holds with `CUDA_VISIBLE_DEVICES=-1`, where in-process `torch.cuda.is_available()=False`.
+- **Isolation both ways (tests):** `evaluate --split val` opens exactly the val images and
+  `--split test` exactly the test images. Training still cannot reach test, and the evaluation
+  selector rejects `train`.
+- **Metric fixtures (hand-computed):** absent class, never-predicted class, perfect predictions,
+  constant majority predictor, and binary vs multiclass. Undefined values are always `null` with a
+  reason.
+- **Demos on the M2 synthetic shapes data** (pipeline demo on synthetic data, not benchmark
+  results):
+  - test evaluations of 4 experiments;
+  - a repeat-evaluation warning (#2);
+  - a `compare` report with CIs, paired differences and 6 confound flags;
+  - CPU and CUDA latency for small_cnn and resnet18.
+  - The M2 database (schema v1) was upgraded to v2 in place.
 
 ## Not verified
 - The CI workflow has never run. The file-symlink test is skipped on this machine.
-- `num_workers > 0` and AMP (no test or demo); GPU determinism for resnet18, efficientnet_b0, or
-  any other configuration than the one demo.
-- Behaviour after a hard kill (`running` rows would remain until M4's startup recovery exists).
-- Python 3.12/3.13; real (non-synthetic) datasets.
+- Latency variance across runs and thermal states (one measurement per configuration).
+- Real (non-synthetic) datasets; Python 3.12/3.13.
 
 ## Blockers
 None.
 
 ## Next task
-M3: one-time test-set evaluation of selected checkpoints, plus a metrics module. Metrics include
-per-class precision/recall, confusion matrix, calibration (ECE) and confidence intervals. Add
-comparison reports that include the majority baseline and flag the input-resolution confound.
+M4: FastAPI endpoints over the library and a single-worker job runner (SQLite job table, cancel,
+mark interrupted `running` jobs failed on startup), plus secure uploads. Test evaluation must stay
+behind the same accounting.

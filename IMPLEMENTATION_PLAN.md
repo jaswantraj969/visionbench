@@ -18,14 +18,14 @@ done only when every acceptance criterion has been demonstrated by commands exec
 - Group-aware stratified train/val/test splits: a whole duplicate group goes to one split; class proportions within a stated tolerance; deterministic given a seed.
 - Versioned JSON manifest (files, hashes, labels, split, group IDs); tests prove no group leaks across splits.
 
-## M2 — Model registry & training (CLI) (implemented; pending review)
+## M2 — Model registry & training (CLI) (done; follow-ups in M3 step 0)
 - Registry: majority-class baseline, SmallCNN, ResNet18, EfficientNet-B0 (pretrained optional, recorded).
 - `visionbench train` with config file + seed; checkpoints under `experiments/<exp_id>/checkpoints/`; early stopping and model selection on validation only.
 - Run record: config, seed report, env info, manifest hash, per-epoch metrics.
 - Tests: tiny synthetic dataset trains end-to-end on CPU; same seed → same metrics on same machine.
 
-## M3 — Evaluation & comparison
-- Test-split evaluation once per final model: accuracy, macro-F1, per-class precision/recall, confusion matrix, calibration (ECE).
+## M3 — Evaluation & comparison (implemented; pending review)
+- Test-split evaluation of the val-selected checkpoint; every test evaluation recorded and counted (reruns allowed but visible): accuracy, macro-F1, per-class precision/recall, confusion matrix, calibration (ECE), bootstrap CIs.
 - Comparison report across runs, including the majority baseline; results stored as JSON.
 
 ## M4 — API, job runner, uploads

@@ -23,7 +23,7 @@ contain no ML logic.
 | `core.errors` | implemented (M1) | `VisionBenchError` hierarchy, the expected user-facing errors |
 | `core.jsonio` | implemented (M1) | canonical JSON (sorted keys, LF, UTF-8) for byte-identical files |
 | `api.main` | implemented (M0) | `create_app()` factory; `/api/health`, `/api/ready`; uniform error schema |
-| `cli` | implemented (M0–M2) | `env`; `dataset import\|report\|verify\|split\|list`; `train`; `experiments list\|show` |
+| `cli` | implemented (M0–M3) | `env`; `dataset import\|report\|verify\|split\|list`; `train`; `experiments list\|show`; `evaluate`; `compare`; `evaluations list` |
 | `data.records` | implemented (M1) | `FileRecord`, `Issue`/`IssueCategory`, NFC names, fingerprint |
 | `data.scan` | implemented (M1) | source validation, Pillow decode checks, symlink/junction refusal |
 | `data.hashing` | implemented (M1) | 64-bit dHash, vectorized near-duplicate edge search |
@@ -42,7 +42,11 @@ contain no ML logic.
 | `training.checkpoints` | implemented (M2) | `save_checkpoint` / `load_checkpoint` (`weights_only=True`, experiments store only) |
 | `training.runner` | implemented (M2) | pre-flight, determinism, tracked run, artifacts |
 | `tracking.store` | implemented (M2) | SQLite experiment store (SQLAlchemy), status state machine |
-| `evaluation` | empty | M3: test-set evaluation (once), metrics, comparison |
+| `evaluation.data` | implemented (M3) | **only** selector that reaches test (`val`\|`test`, never `train`); verified checkpoint + recorded val transform |
+| `evaluation.metrics` | implemented (M3) | metrics with explicit undefined values, ECE, bootstrap and paired-bootstrap CIs |
+| `evaluation.efficiency` | implemented (M3) | params, checkpoint size, forward-pass latency |
+| `evaluation.evaluate` | implemented (M3) | `evaluate_experiment`: predictions, metrics, outputs, test-use accounting |
+| `evaluation.compare` | implemented (M3) | comparison report, VAL-only ranking, confound flags |
 | `explain` | empty | M5: Grad-CAM |
 | `robustness` | empty | M6: corruption benchmarks |
 | `jobs` | empty | M4: single-worker job runner |
@@ -73,13 +77,16 @@ var/
       history.jsonl                  one JSON line per epoch
       train.log                      run log (start, epochs, warnings, outcome)
       checkpoints/                   best.pt/.json, last.pt/.json (or baseline.json)
+      evaluations/<eval_id>/         (M3) ev-<YYYYMMDD-HHMMSS>-<6 hex>: metrics.json,
+                                     predictions.csv, confusion_matrix.json, efficiency.json
   db/visionbench.db                  (M2) SQLite experiment store
   cache/torch/checkpoints/           (M2) torchvision weights (default torch hub dir;
                                      VISIONBENCH_TORCH_HOME overrides)
   cache/norm_stats/<dataset_id>/<split_id>/norm_stats_train_<N>px.json
                                      (M3 step 0) train-only mean/std cache per resolution;
                                      split directories are never written after creation
-  artifacts/                         reserved (M3+: reports, Grad-CAM maps)
+  reports/<report_id>/               (M3) rp-...: comparison.json, comparison.md
+  artifacts/                         reserved (M5+: Grad-CAM maps)
 ```
 
 Subdirectories are created on first use (`Settings.data_dir()`), never at import time.
@@ -145,7 +152,7 @@ Notes:
 The majority baseline uses the same path but needs only labels. It fits train priors, scores the
 val labels, and writes `checkpoints/baseline.json`. It opens no images.
 
-### Database schema (`db/visionbench.db`, schema version 1)
+### Database schema (`db/visionbench.db`, schema version 2)
 
 | Table | Columns |
 |---|---|
@@ -153,14 +160,44 @@ val labels, and writes `checkpoints/baseline.json`. It opens no images.
 | `experiments` | `id` (PK), `created_at`, `started_at`, `finished_at`, `status`, `error`, `dataset_id`, `split_id`, `dataset_fingerprint`, `model`, `weights_source`, `weights_enum`, `weights_sha256`, `config_json`, `env_json`, `seed`, `best_epoch`, `best_metric`, `train_seconds`, `run_dir` |
 | `epoch_metrics` | `id`, `experiment_id` (FK), `epoch`, `train_loss`, `val_loss`, `val_accuracy`, `val_balanced_accuracy`, `lr`, `epoch_seconds`, `steps` |
 | `artifacts` | `id`, `experiment_id` (FK), `kind`, `relpath` (relative to data root), `sha256`, `size_bytes`, `created_at` |
+| `evaluations` (M3) | `id` (PK), `experiment_id` (FK), `split` (`val`\|`test`), `checkpoint` (`best`\|`last`\|`baseline`), `created_at`, `metrics_path`, `predictions_sha256`, `visionbench_version` |
 
-- Tables are created with `create_all`. A stored schema version other than 1 is an error, since
-  there are no migrations (Alembic) yet.
+- Tables are created with `create_all`. The only upgrade is the additive v1 → v2 (new
+  `evaluations` table), which was applied automatically to the M2 demo database. Any other
+  stored version is an error, since there are no migrations (Alembic) yet.
+- Listings are ordered by `created_at` and then SQLite insertion order (`rowid`). Timestamps
+  have 1-second resolution, and `compare` relies on "latest evaluation" being well defined.
 - Allowed status transitions: `pending → running | failed | cancelled` and
   `running → completed | failed | cancelled`. Anything else raises.
 - Rows are never left `running` by a process that exits through Python. A hard kill (power loss,
   `taskkill /F`) can still leave a `running` row, and M4's startup recovery must mark those
   `failed`.
+
+## Evaluation (M3)
+
+`visionbench evaluate <exp> --split val|test [--checkpoint best|last]` → `evaluation.evaluate.evaluate_experiment`:
+
+1. `open_for_evaluation`:
+   - the experiment must be `completed`;
+   - the training pre-flight runs (fast verify + manifest fingerprint);
+   - the manifest sha256 must equal the one recorded at training;
+   - the checkpoint file's sha256 must equal its artifact row.
+2. The previous test evaluations of this experiment + checkpoint are counted, and a warning
+   is printed if there are any.
+3. `load_for_evaluation`: `weights_only=True` load from `experiments/`. The architecture is
+   rebuilt from the registry, and the val transform is rebuilt from `config.json` and must
+   match the recorded transform list exactly.
+4. Predictions run in manifest relpath order through `evaluation.data.build_eval_dataloader`
+   (`select_eval_entries` + the shared `load_image` choke point). The majority baseline uses
+   labels only and opens no images.
+5. Metrics, bootstrap CIs and efficiency (latency on the evaluation device) are computed. The
+   four output files are written and registered as artifacts, and an `evaluations` row is
+   inserted.
+
+`visionbench compare <exp> <exp> ... --split val|test` reads the latest recorded evaluation of
+each experiment's val-selected checkpoint. It never evaluates implicitly. It verifies each
+predictions file against its recorded sha256, requires identical samples and labels, and
+writes `reports/<report_id>/comparison.{json,md}`.
 
 ## Error schema
 

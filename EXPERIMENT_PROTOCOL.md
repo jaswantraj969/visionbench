@@ -138,15 +138,27 @@ Limits:
 - AMP (`amp: true`, CUDA only) has not been tested and may break determinism.
 - Ops that lack deterministic CUDA kernels make the run fail, with the error recorded.
 
-## 6. Model selection (implemented, M2; test evaluation is M3)
+## 6. Model selection and test use (implemented, M2–M3)
 - Training builds data loaders for **train** and **val** only. Every access to manifest entries
   goes through `training.data.select_entries`, which rejects any other split name. A test patches the
   image loader and asserts that no test-split file is ever opened during a full training run.
 - Early stopping and best-checkpoint selection use **validation metrics only**: `val_loss`
   (default, unweighted mean cross-entropy) or `val_balanced_accuracy`, with `patience` and
   `min_delta`. `best.pt` is the epoch with the best monitored value, and its epoch is recorded.
-- The **test split is evaluated once** per final model, for final reporting (M3). Test results never
-  feed back into any choice.
+- **Test images are reachable only through `evaluation.data.select_eval_entries`.** It allows `val`
+  and `test` and never `train`, because evaluating on the training split is not a supported report.
+  Tests check isolation both ways: `evaluate --split val` opens no test image, and
+  `--split test` opens no train or val image.
+- The checkpoint reported on test is the **val-selected** `best.pt` by default. `last.pt` is
+  evaluated only with `--checkpoint last`, and the result is recorded as `checkpoint: last`.
+- **Test-use accounting:** every evaluation is a row in the `evaluations` table. Re-evaluating the
+  same experiment and checkpoint on test is allowed, because development needs reruns, but it
+  prints a warning with the count of previous test evaluations. The counts appear in every
+  `metrics.json` (`test_use`) and in every comparison report (`test evaluations so far` column,
+  plus a `repeated_test_evaluation` confound flag). Nothing is blocked, and nothing is hidden.
+- **Ranking uses validation only.** `compare` ranks models by validation balanced accuracy at the
+  val-selected epoch, using competition ranks with ties marked `=`. Test metrics are reported for
+  every model, with CIs and paired differences, **without a winner label**.
 
 ## 7. Preprocessing (implemented, M2)
 - **Pretrained weights:** use the weights' own transform. ResNet18: resize 256 (bilinear), then
@@ -197,12 +209,84 @@ Limits:
   probabilities are the train priors. It is saved as JSON and opens no images.
 - It must be reported with every comparison (M3).
 
-## 10. Synthetic sanity checks are not benchmarks
-The M2 demos use a generated shapes dataset to show that the pipeline learns. Their numbers are
+## 10. Evaluation metrics, CIs, efficiency and confounds (implemented, M3)
+
+**Inputs.** Metrics are computed from saved predictions: true label, predicted label (the argmax
+of the probabilities) and per-class probabilities. Evaluation re-uses the run's recorded
+deterministic validation transform; it is rebuilt from `config.json` and checked string-for-string.
+Before a checkpoint is loaded, these checks run:
+- the fast dataset verify;
+- the manifest fingerprint check;
+- the manifest sha256 must equal the one recorded at training;
+- the checkpoint sha256 must equal its artifact row.
+
+The checkpoint is then loaded with `weights_only=True` from `experiments/` only.
+
+**Point metrics** (`evaluation/metrics.py`):
+
+| Metric | Definition | Undefined (→ `null` + reason) |
+|---|---|---|
+| accuracy | correct / n | never (n > 0 is required) |
+| per-class precision | tp / (tp + fp) | class never predicted → `class_never_predicted` |
+| per-class recall | tp / (tp + fn) | class absent from the evaluated set → `class_absent_from_eval_set` |
+| per-class F1 | 2tp / (2tp + fp + fn), the same formula as scikit-learn ≥ 1.3 | class absent **and** never predicted |
+| macro P/R/F1 | mean over classes whose value is defined; excluded classes listed in `macro_excluded_classes` | no class defined |
+| weighted P/R/F1 | support-weighted mean over defined values | no class defined |
+| balanced accuracy | mean recall over classes present in the set (= macro recall); absent classes listed | no class present |
+| confusion matrix | counts (rows = true) + row-normalized | row of an absent class → `null` row |
+| log loss | scikit-learn `log_loss` (clips probabilities to [eps, 1−eps], float64 eps) | no probabilities. `log_loss_clipped_samples` > 0 means the value is a **lower bound** |
+| ROC-AUC (OvR macro; binary uses p(class 1)) | scikit-learn `roc_auc_score` | probabilities missing, or any class without ≥1 positive and ≥1 negative |
+| average precision | per class + macro | per class: no positive/negative; macro: same rule as ROC-AUC |
+| ECE | 15 equal-width bins on (0, 1], top-label confidence; Σ \|acc_b − conf_b\| · n_b / n; reliability-bin table included | no probabilities. **A calibration estimate that is noisy on small sets.** |
+
+Undefined values are never reported as 0 or as an invented number. scikit-learn is called with
+`zero_division=np.nan`, NaN is converted to `null`, and the reason goes into `metrics.undefined`
+under the JSON path of the value. All metrics are validated against hand-computed fixtures:
+absent class, never-predicted class, perfect predictions, constant majority predictor, and binary
+vs multiclass.
+
+**Confidence intervals.** These are 95% percentile bootstrap CIs over the evaluated samples, for
+accuracy, balanced accuracy and macro F1. The defaults are 1000 resamples and seed 0; both are
+recorded, along with the NumPy version, since the Generator stream is version-dependent. Resamples
+where a metric is undefined are excluded and counted (`resamples_defined`). The CIs reflect
+**test-set sampling variation only**, not training-seed variance.
+
+**Paired differences** (in `compare`): metric(experiment) − metric(reference) on each resample,
+using the **same resampled indices** for both models. The reference is the majority baseline if
+present, otherwise the first experiment, or `--reference`.
+
+**Latency** (`evaluation/efficiency.py`):
+- Measures the **model forward pass only**; preprocessing, decoding and data loading are excluded.
+- Uses random input at the model's input size, `torch.inference_mode`, eval mode, 10 warmup
+  iterations, then 50 timed iterations with `torch.cuda.synchronize` before and after each on CUDA.
+- Batch sizes are 1 and 32. Reported: median and p95 ms, plus device, GPU or CPU name, torch
+  threads and input size.
+- A latency number is valid only for the device it was measured on. Comparisons flag mixed
+  devices.
+- The majority baseline reports latency as not applicable (`null` + reason).
+- Efficiency also records parameter counts (total/trainable, from training), `best.pt` size in
+  bytes, and training seconds.
+
+**Confound flags** (computed automatically by `compare`):
+- `input_resolution_differs`
+- `pretrained_vs_scratch`
+- `early_stopping_monitor_differs`
+- `training_budget_differs` (configured epochs/max_steps; actual epochs trained shown)
+- `seeds_differ`
+- `single_seed_per_model` (seed variance unmeasured)
+- `class_weighting_differs`
+- `latency_devices_differ`
+- `repeated_test_evaluation` (with per-experiment test counts)
+
+`compare` refuses experiments with different dataset fingerprints or split_ids; there is no
+override.
+
+## 11. Synthetic sanity checks are not benchmarks
+The M2 and M3 demos use a generated shapes dataset to show that the pipeline works end to end. Their numbers are
 **pipeline sanity checks on synthetic data, not benchmark results**, and must never be cited as
 model performance.
 
-## 11. Known limitations
+## 12. Known limitations
 - dHash finds resizes and re-encodes. It **misses** crops, rotations, flips, heavy color or contrast
   edits, overlays, and semantic near-duplicates (the same object photographed twice).
 - The threshold trades false positives (distinct but similar images merged) against false negatives.
@@ -220,3 +304,10 @@ model performance.
 - Balanced accuracy averages recall over the classes **present in val**. A class with no val images
   is left out of the mean.
 - The majority baseline floors zero priors at 1e-12 when computing loss.
+- Images are used in stored pixel orientation: neither dHash (M1) nor training/evaluation loading
+  applies EXIF orientation (`ImageOps.exif_transpose` is not called). Photos whose orientation is
+  only encoded in EXIF are seen rotated, consistently across duplicate detection, training and
+  evaluation.
+- Bootstrap CIs on small evaluation sets are coarse; with 54 test images a single error moves
+  accuracy by ~0.019. Perfect predictions give a degenerate CI [1, 1], which does not mean the
+  true error rate is zero.

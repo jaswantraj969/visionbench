@@ -1,5 +1,50 @@
 # Changelog
 
+## Unreleased: M3 evaluation, test-use accounting, comparison (2026-10-27)
+
+### Added
+- `visionbench.evaluation.data`:
+  - the only selector that reaches test images (`val|test`, never `train`);
+  - evaluation re-uses the recorded val transform, which is checked exactly;
+  - pre-load checks: fast verify, manifest fingerprint, manifest sha256, checkpoint sha256 vs its
+    artifact row; checkpoints load with `weights_only=True`.
+- `visionbench.evaluation.metrics`:
+  - accuracy; balanced accuracy (absent classes listed); macro/weighted/per-class P/R/F1;
+    confusion matrix (counts + row-normalized);
+  - log loss, with the clipped-sample count reported;
+  - ROC-AUC OvR macro and AP only when every class has positives and negatives;
+  - ECE (15 bins) with a reliability table;
+  - undefined values are `null` + reason;
+  - percentile bootstrap CIs and a paired bootstrap of differences with shared indices.
+- `visionbench.evaluation.efficiency`: parameter counts, checkpoint size, training seconds, and
+  forward-pass latency (batch 1/32, median/p95, device info). The baseline reports latency as not
+  applicable.
+- `visionbench.evaluation.evaluate`: per-evaluation `metrics.json`, `predictions.csv`,
+  `confusion_matrix.json` and `efficiency.json`, all registered as artifacts. An `evaluations`
+  table (DB schema v2, additive upgrade from v1) records every run, and repeated test evaluations
+  are warned and counted.
+- `visionbench.evaluation.compare`:
+  - refuses mismatched datasets or splits;
+  - table with efficiency, val selection metric, and split metrics with CIs;
+  - paired differences vs a reference;
+  - VAL-only ranking with ties marked;
+  - confound flags;
+  - writes `reports/<id>/comparison.{json,md}`.
+- CLI: `evaluate`, `compare`, `evaluations list`.
+- Dependency: `scikit-learn` (planned since M0).
+
+### Changed (M3 step 0)
+- `VISIONBENCH_TORCH_HOME` sets the torch hub dir (recorded as `resolved.torch_hub_dir`).
+- head_only fine-tuning keeps frozen backbone BatchNorm layers in eval mode (`frozen_bn`).
+- The train norm-stats cache moved to `cache/norm_stats/<dataset_id>/<split_id>/`; split
+  directories are no longer written after creation.
+- The protocol documents that `train_loss` is class-weighted under weighting and `val_loss` is
+  always unweighted.
+
+### Fixed
+- Listings of experiments and evaluations break same-second timestamp ties by insertion order.
+  Before this, `compare` could treat an older evaluation as the latest.
+
 ## Unreleased: M2 model registry, training, tracking (2026-10-27)
 
 ### Added
