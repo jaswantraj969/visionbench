@@ -14,7 +14,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Float, ForeignKey, Integer, String, Text, create_engine, select
+from sqlalchemy import (
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    create_engine,
+    literal_column,
+    select,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 from visionbench.core.errors import VisionBenchError
@@ -27,6 +36,11 @@ _TRANSITIONS = {
     "pending": {"running", "failed", "cancelled"},
     "running": {"completed", "failed", "cancelled"},
 }
+
+
+# Timestamps have 1 s resolution; ties are broken by SQLite insertion order so that
+# "latest" is well defined (compare uses the latest evaluation).
+_INSERTION_ORDER = literal_column("rowid")
 
 
 class TrackingError(VisionBenchError):
@@ -246,7 +260,7 @@ class ExperimentStore:
 
     def list(self) -> list[dict[str, Any]]:
         with Session(self.engine) as s:
-            rows = s.scalars(select(Experiment).order_by(Experiment.created_at, Experiment.id))
+            rows = s.scalars(select(Experiment).order_by(Experiment.created_at, _INSERTION_ORDER))
             return [_row(r) for r in rows]
 
     def epochs(self, exp_id: str) -> list[dict[str, Any]]:
@@ -302,4 +316,4 @@ class ExperimentStore:
                 q = q.where(Evaluation.split == split)
             if checkpoint is not None:
                 q = q.where(Evaluation.checkpoint == checkpoint)
-            return [_row(r) for r in s.scalars(q.order_by(Evaluation.created_at, Evaluation.id))]
+            return [_row(r) for r in s.scalars(q.order_by(Evaluation.created_at, _INSERTION_ORDER))]

@@ -80,6 +80,12 @@ def _entry(store: ExperimentStore, data_root: Path, exp_id: str, split: str) -> 
     }
 
 
+def competition_ranks(values: dict[str, float]) -> dict[str, int]:
+    """Higher is better; equal values share a rank ("1224" ranking)."""
+    ordered = sorted(values.values(), reverse=True)
+    return {k: ordered.index(v) + 1 for k, v in values.items()}
+
+
 def _confounds(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     flags: list[dict[str, Any]] = []
     trained = [e for e in entries if e["experiment"]["model"] != "majority_baseline"]
@@ -263,6 +269,9 @@ def compare_experiments(
         "val_ranking": {
             "basis": "validation balanced accuracy at the val-selected epoch (VAL only)",
             "order": [r["experiment_id"] for r in ranked],
+            "ranks": competition_ranks(
+                {r["experiment_id"]: r["val_balanced_accuracy_at_selected_epoch"] for r in ranked}
+            ),
         },
         "confounds": _confounds(entries),
     }
@@ -371,11 +380,17 @@ def render_markdown(report: dict[str, Any]) -> str:
     vr = report["val_ranking"]
     by_id = {r["experiment_id"]: r for r in report["rows"]}
     lines += ["", "## Validation ranking", "", f"Basis: {vr['basis']}.", ""]
-    for i, exp_id in enumerate(vr["order"], 1):
-        r = by_id[exp_id]
+    tied = Counter(vr["ranks"].values())
+    for exp_id in vr["order"]:
+        r, rank = by_id[exp_id], vr["ranks"][exp_id]
+        label = f"{rank}=" if tied[rank] > 1 else f"{rank}"
         lines.append(
-            f"{i}. `{exp_id}` {r['model']}: {_f(r['val_balanced_accuracy_at_selected_epoch'])}"
+            f"- rank {label}: `{exp_id}` {r['model']}: "
+            f"{_f(r['val_balanced_accuracy_at_selected_epoch'])}"
         )
+    if any(n > 1 for n in tied.values()):
+        lines.append("")
+        lines.append("`=` marks tied validation values; tied models are not ordered.")
     lines += ["", "## Confound flags", ""]
     if not report["confounds"]:
         lines.append("None detected.")

@@ -297,3 +297,41 @@ def test_cli_evaluate_compare_list(trained, monkeypatch, capsys) -> None:
         main(["evaluate", cnn, "--split", "train"])
     assert exc.value.code == 2
     assert main(["compare", cnn, "--split", "test"]) == 1
+
+
+def test_competition_ranks_mark_ties() -> None:
+    from visionbench.evaluation.compare import competition_ranks
+
+    assert competition_ranks({"a": 1.0, "b": 1.0, "c": 0.8, "d": 0.3}) == {
+        "a": 1,
+        "b": 1,
+        "c": 3,
+        "d": 4,
+    }
+
+
+def test_evaluations_ordered_by_insertion_within_same_timestamp(tmp_path, monkeypatch) -> None:
+    from visionbench.tracking import store as store_mod
+
+    monkeypatch.setattr(store_mod, "utcnow", lambda: "2026-01-01T00:00:00+00:00")
+    with ExperimentStore(tmp_path / DB_FILENAME) as s:
+        exp = s.create(
+            dataset_id="ds",
+            split_id="sp",
+            dataset_fingerprint="f",
+            model="m",
+            seed=0,
+            config={},
+            run_dir="experiments/{exp_id}",
+        )
+        for eid in ("ev-c", "ev-a", "ev-b"):  # not alphabetical: insertion order must win
+            s.add_evaluation(
+                eval_id=eid,
+                experiment_id=exp,
+                split="test",
+                checkpoint="best",
+                metrics_path="m.json",
+                predictions_sha256="0" * 64,
+                visionbench_version="t",
+            )
+        assert [e["id"] for e in s.evaluations(exp)] == ["ev-c", "ev-a", "ev-b"]
