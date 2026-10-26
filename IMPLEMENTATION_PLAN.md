@@ -3,7 +3,7 @@
 Each milestone ends with a supervisor review of evidence (`REVIEW_PACKET.md`). A milestone is
 done only when every acceptance criterion has been demonstrated by commands executed in-session.
 
-## M0 — Foundation
+## M0 — Foundation (done; follow-ups addressed in M1)
 - Package `visionbench` (src layout) installs into a fresh venv with documented commands.
 - `core.config` (pydantic-settings, `VISIONBENCH_` prefix, data root default `./var`, subdirs created on demand), `core.seeding.set_seed`, `core.env_info`.
 - FastAPI factory with `GET /api/health` and `GET /api/ready` (200 / 503 with reason), uniform error schema `{"error":{"code","message"}}`.
@@ -11,7 +11,7 @@ done only when every acceptance criterion has been demonstrated by commands exec
 - ruff clean; tests cover config, seed reproducibility, health, ready (writable and unwritable data root).
 - Continuity files present; CI workflow file present (validated later).
 
-## M1 — Dataset ingestion & validation
+## M1 — Dataset ingestion & validation (implemented; pending review)
 - Import an image-folder dataset (class-per-directory) into the data root; reject corrupt/unsupported files with a per-file report.
 - Statistics: class counts, image size / mode distribution, corrupt-file list.
 - Duplicate groups: exact (SHA-256) and near (perceptual hash, documented threshold); label-conflict groups flagged.
