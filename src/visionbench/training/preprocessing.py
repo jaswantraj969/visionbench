@@ -2,7 +2,8 @@
 
 - Pretrained models: the weights' own resize / center-crop / interpolation / mean / std.
 - Scratch models: resize to ``input_size`` x ``input_size`` and normalize with per-channel
-  mean/std computed on the TRAIN split only (no augmentation), cached per split and resolution.
+  mean/std computed on the TRAIN split only (no augmentation), cached per split and resolution
+  under ``<data_root>/cache/norm_stats/``.
 - Augmentation is applied to training images only; validation transforms are deterministic.
 """
 
@@ -125,23 +126,25 @@ def compute_train_norm_stats(
 
 
 def train_norm_stats(
-    manifest: dict[str, Any], raw_root: Path, input_size: int, split_dir: Path
-) -> tuple[dict[str, Any], bool]:
-    """Cached :func:`compute_train_norm_stats`; returns (stats, loaded_from_cache).
+    manifest: dict[str, Any], raw_root: Path, input_size: int, cache_dir: Path
+) -> tuple[dict[str, Any], bool, Path]:
+    """Cached :func:`compute_train_norm_stats`; returns (stats, loaded_from_cache, cache file).
 
-    The cache file lives next to the manifest, keyed by resolution, and is only reused when its
+    ``cache_dir`` is ``<data_root>/cache/norm_stats/<dataset_id>/<split_id>`` (never the split
+    directory, which stays write-once). The file is keyed by resolution and only reused when its
     train fingerprint (train relpaths + sha256) matches.
     """
-    cache = split_dir / f"norm_stats_train_{input_size}px.json"
+    cache = cache_dir / f"norm_stats_train_{input_size}px.json"
     if cache.is_file():
         stats = read_json(cache)
         if stats.get("version") == NORM_STATS_VERSION and stats.get(
             "train_fingerprint"
         ) == _train_fingerprint(manifest):
-            return stats, True
+            return stats, True, cache
     stats = compute_train_norm_stats(manifest, raw_root, input_size)
+    cache_dir.mkdir(parents=True, exist_ok=True)
     write_json(cache, stats)
-    return stats, False
+    return stats, False, cache
 
 
 def class_weights_from_train(manifest: dict[str, Any]) -> list[float]:

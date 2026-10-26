@@ -135,7 +135,8 @@ num_workers: 0
   `history.jsonl`, `train.log` and `checkpoints/`. It also adds rows to
   `<data_root>/db/visionbench.db`.
 - `--device auto|cpu|cuda`. `--amp` requires CUDA and is untested.
-- With `weights: imagenet`, torchvision weights are downloaded into `<data_root>/cache/torch`. If
+- With `weights: imagenet`, torchvision weights are downloaded into `VISIONBENCH_TORCH_HOME` (default
+  `<data_root>/cache/torch`). If
   they can't be obtained the run fails. `--allow-weight-fallback` trains from scratch instead and
   records `weights=scratch`.
 - Synthetic demo results are **pipeline sanity checks on synthetic data, not benchmark results**.

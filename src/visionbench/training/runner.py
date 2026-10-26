@@ -30,7 +30,7 @@ from visionbench.core.jsonio import read_json, write_json
 from visionbench.core.seeding import set_seed
 from visionbench.data.store import dataset_dir, load_dataset, verify_dataset
 from visionbench.models.baseline import MajorityBaseline
-from visionbench.models.pretrained import file_sha256, weights_cache_dir
+from visionbench.models.pretrained import file_sha256
 from visionbench.models.registry import BuiltModel, build_model
 from visionbench.tracking.store import DB_FILENAME, ExperimentStore
 from visionbench.training import loop
@@ -255,13 +255,17 @@ def _run_baseline(
     )
 
 
-def _preprocessing(built: BuiltModel, pre: Preflight) -> tuple[Preprocessing, dict[str, Any]]:
+def _preprocessing(
+    built: BuiltModel, pre: Preflight, cache_dir: Path, data_root: Path
+) -> tuple[Preprocessing, dict[str, Any]]:
     if built.pretrained is not None:
         p = built.pretrained
         prep = Preprocessing("imagenet_weights", p.crop, p.resize, p.interpolation, p.mean, p.std)
         return prep, {"source": "imagenet_weights", "weights_enum": p.enum_name}
     assert built.input_size is not None
-    stats, cached = train_norm_stats(pre.manifest, pre.raw_root, built.input_size, pre.split_dir)
+    stats, cached, cache_file = train_norm_stats(
+        pre.manifest, pre.raw_root, built.input_size, cache_dir
+    )
     prep = Preprocessing(
         "train_split",
         built.input_size,
@@ -270,11 +274,10 @@ def _preprocessing(built: BuiltModel, pre: Preflight) -> tuple[Preprocessing, di
         tuple(stats["mean"]),
         tuple(stats["std"]),
     )
-    cache = pre.split_dir / f"norm_stats_train_{built.input_size}px.json"
     return prep, {
         "source": "train_split",
         "stats": stats,
-        "cache_file": cache.name,
+        "cache_file": cache_file.relative_to(data_root).as_posix(),
         "loaded_from_cache": cached,
     }
 
@@ -306,7 +309,7 @@ def _execute(
         weights=config.weights,
         finetune=config.finetune,
         input_size=config.input_size,
-        hub_dir=weights_cache_dir(data_root),
+        hub_dir=settings.resolved_torch_home,
         allow_weight_fallback=config.allow_weight_fallback,
     )
     ctx.store.update(
@@ -327,6 +330,7 @@ def _execute(
         "train_class_counts": split_class_counts(pre.manifest, "train"),
         "val_class_counts": split_class_counts(pre.manifest, "val"),
         "device": str(device),
+        "torch_hub_dir": str(settings.resolved_torch_home),
     }
 
     def write_config() -> None:
@@ -338,7 +342,8 @@ def _execute(
         write_config()
         return _run_baseline(ctx, config, pre, class_names)
 
-    prep, norm = _preprocessing(built, pre)
+    norm_cache = settings.norm_stats_dir(config.dataset_id, config.split_id)
+    prep, norm = _preprocessing(built, pre, norm_cache, data_root)
     train_tf, val_tf = build_transforms(prep, config.augmentation)
     pin = device.type == "cuda"
     train_loader = build_dataloader(
@@ -370,7 +375,10 @@ def _execute(
         "val_transforms": describe_transforms(val_tf),
         "class_weights": class_weights,
         "train_drop_last": train_loader.drop_last,
+        "train_loss": "class-weighted cross-entropy" if class_weights else "mean cross-entropy",
         "val_loss": "unweighted mean cross-entropy",
+        "frozen_bn": bool(loop.frozen_batchnorm_layers(built.model)),
+        "frozen_bn_layers": len(loop.frozen_batchnorm_layers(built.model)),
     }
     write_config()
 

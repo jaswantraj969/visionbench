@@ -1,4 +1,5 @@
-"""Pretrained ImageNet weights from torchvision, cached under ``<data_root>/cache/torch``.
+"""Pretrained ImageNet weights from torchvision, cached in the torch hub directory
+(``VISIONBENCH_TORCH_HOME``, default ``<data_root>/cache/torch``).
 
 Weights are fetched with torch.hub (``check_hash=True`` on download) and loaded with
 ``weights_only=True``. The cached file's SHA-256 is computed and must start with the hash prefix
@@ -53,10 +54,6 @@ class PretrainedInfo:
             "mean": list(self.mean),
             "std": list(self.std),
         }
-
-
-def weights_cache_dir(data_root: Path) -> Path:
-    return data_root / "cache" / "torch"
 
 
 def file_sha256(path: Path) -> str:

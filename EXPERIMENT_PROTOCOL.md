@@ -155,29 +155,42 @@ Limits:
   pretrained model is an error.
 - **Scratch models:** resize to `input_size × input_size` (bilinear) and normalize with per-channel
   mean/std computed on the **train split only**. The statistics use the model's resolution and no
-  augmentation. They are cached next to the manifest as `norm_stats_train_<N>px.json`, keyed by
+  augmentation. They are cached as
+  `<data_root>/cache/norm_stats/<dataset_id>/<split_id>/norm_stats_train_<N>px.json`, keyed by
   resolution and a fingerprint of the train relpaths and hashes, and recorded in `config.json`.
-  Tests check that the stats do not change when only val/test change, and do change when train
-  changes.
+  Split directories stay write-once (since M3: a test checks that their files and hashes are
+  unchanged by training). Tests check that the stats do not change when only val/test change, and
+  do change when train changes.
 - **Augmentation (train only):** default `RandomResizedCrop(scale 0.8–1.0)` plus horizontal flip.
   Validation transforms are deterministic. Both transform lists are recorded.
 - **Class-weighted loss** (optional) uses `N / (K · n_c)` from **train counts only**.
+- **Loss reporting:** when class weighting is on, the logged `train_loss` is the **class-weighted**
+  cross-entropy (PyTorch's weighted mean per batch, averaged over samples). `val_loss` is
+  **always unweighted** mean cross-entropy, so it stays comparable across runs with and without
+  weighting. `config.json` records both definitions (`resolved.train_loss`, `resolved.val_loss`).
+  Because the two can be defined differently, don't compare train and val loss directly in
+  weighted runs.
 - **Resolution confound:** `input_size` is recorded for every run (SmallCNN default 64, torchvision
   models 224). Comparisons across models at different resolutions confound architecture with input
   resolution, and M3 comparison reports must flag this.
 
 ## 8. Pretrained weight policy (implemented, M2)
 - Weights come only from torchvision's weights API. They are downloaded through torch.hub into
-  `<data_root>/cache/torch/checkpoints/` with `check_hash=True`, and loaded with
-  `weights_only=True`.
+  `<torch_home>/checkpoints/` with `check_hash=True`, and loaded with `weights_only=True`.
+  `<torch_home>` is `VISIONBENCH_TORCH_HOME` if set, otherwise `<data_root>/cache/torch`. The
+  resolved directory is recorded as `resolved.torch_hub_dir` in `config.json`.
 - The file's SHA-256 must start with the hash prefix in its file name. The weights enum name, file
   path and SHA-256 are recorded in `config.json` and in the experiment row.
 - If weights cannot be obtained, training **fails** with a clear message by default. Only with
   `--allow-weight-fallback` does it train from scratch instead. Then `weights="scratch"` is recorded
   everywhere, the reason is recorded, and `train.log` contains a `WEIGHT FALLBACK` warning. There is
   never a silent fallback.
-- `finetune: head_only` freezes all parameters except the classifier head. BatchNorm running
-  statistics in the frozen backbone still update in train mode.
+- `finetune: head_only` freezes all parameters except the classifier head. Since M3, every
+  BatchNorm layer whose parameters are all frozen is put back into eval mode after each
+  `model.train()`. Its running statistics therefore stay at their pretrained values, and this is
+  recorded as `resolved.frozen_bn: true` with `frozen_bn_layers` (20 for ResNet18). A test checks
+  that the backbone running mean/var are unchanged after a head_only epoch, with a full-fine-tune
+  control.
 
 ## 9. Baselines
 - The majority-class baseline (implemented, M2) predicts the most frequent **train** class. Its

@@ -77,7 +77,7 @@ def test_scratch_model_records_train_norm_stats_and_resolution(train_env) -> Non
     assert resolved["input_size"] == 32 and norm["source"] == "train_split"
     assert norm["stats"]["train_images"] == sum(resolved["train_class_counts"].values())
     assert resolved["preprocessing"]["mean"] == norm["stats"]["mean"]
-    assert (train_env.split_dir / "norm_stats_train_32px.json").is_file()
+    assert norm["cache_file"].startswith("cache/norm_stats/")
     assert any("RandomHorizontalFlip" in t for t in resolved["train_transforms"])
     assert not any("Random" in t for t in resolved["val_transforms"])
     second = run_training(train_env.config(epochs=1), train_env.settings)

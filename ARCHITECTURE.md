@@ -34,7 +34,7 @@ contain no ML logic.
 | `models.registry` | implemented (M2) | `build_model()` → model, input size, normalization source, param counts, Grad-CAM target layer |
 | `models.baseline` | implemented (M2) | majority-class baseline (train priors; JSON) |
 | `models.small_cnn` | implemented (M2) | 4-block CNN, target layer `features.block4.conv` |
-| `models.pretrained` | implemented (M2) | torchvision ImageNet weights via torch.hub into `<data_root>/cache/torch`; sha256 check |
+| `models.pretrained` | implemented (M2) | torchvision ImageNet weights via torch.hub into `VISIONBENCH_TORCH_HOME` (default `<data_root>/cache/torch`); sha256 check |
 | `training.config` | implemented (M2) | `TrainConfig` (Pydantic, YAML + dotted overrides) |
 | `training.data` | implemented (M2) | loader factory; **train/val only** (`select_entries`); `load_image` choke point |
 | `training.preprocessing` | implemented (M2) | transforms, train-only norm stats (cached), class weights |
@@ -64,7 +64,6 @@ var/
       splits/<split_id>/             sp-<12 hex>
         manifest.json                canonical, byte-reproducible (no timestamps)
         split_info.json              created_at, manifest sha256, numpy/python versions
-        norm_stats_train_<N>px.json  (M2) train-only mean/std cache per resolution
     .tmp-import-*/  .tmp-split-*/    staging dirs; renamed into place on success, removed on error
   experiments/                       (M2, implemented)
     <exp_id>/                        exp-<YYYYMMDD-HHMMSS>-<6 hex>
@@ -75,7 +74,11 @@ var/
       train.log                      run log (start, epochs, warnings, outcome)
       checkpoints/                   best.pt/.json, last.pt/.json (or baseline.json)
   db/visionbench.db                  (M2) SQLite experiment store
-  cache/torch/checkpoints/           (M2) torchvision pretrained weights (torch.hub dir)
+  cache/torch/checkpoints/           (M2) torchvision weights (default torch hub dir;
+                                     VISIONBENCH_TORCH_HOME overrides)
+  cache/norm_stats/<dataset_id>/<split_id>/norm_stats_train_<N>px.json
+                                     (M3 step 0) train-only mean/std cache per resolution;
+                                     split directories are never written after creation
   artifacts/                         reserved (M3+: reports, Grad-CAM maps)
 ```
 
@@ -179,5 +182,6 @@ Unhandled exceptions return `500 internal_error` without leaking exception detai
   `torch.load(..., weights_only=True)`.
 - User-uploaded models or pickles are never accepted or loaded.
 - Pretrained weights come only from torchvision's weights API. They are fetched through torch.hub
-  with `check_hash=True` into `<data_root>/cache/torch`, loaded with `weights_only=True`, and the
+  with `check_hash=True` into the torch hub dir (`VISIONBENCH_TORCH_HOME`, default
+  `<data_root>/cache/torch`), loaded with `weights_only=True`, and the
   file's sha256 is checked against the hash prefix in its name and recorded.

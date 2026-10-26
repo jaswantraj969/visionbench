@@ -56,6 +56,27 @@ class EarlyStopping:
         return self.enabled and self.bad_epochs >= self.patience
 
 
+def frozen_batchnorm_layers(model: nn.Module) -> list[nn.Module]:
+    """BatchNorm layers whose affine parameters are all frozen (requires_grad False)."""
+    out = []
+    for m in model.modules():
+        if isinstance(m, nn.modules.batchnorm._BatchNorm):
+            params = list(m.parameters(recurse=False))
+            if params and not any(p.requires_grad for p in params):
+                out.append(m)
+    return out
+
+
+def train_mode(model: nn.Module) -> int:
+    """``model.train()``, then put frozen BatchNorm layers back into eval mode so their running
+    statistics stay fixed (head_only fine-tuning). Returns the number of such layers."""
+    model.train()
+    frozen = frozen_batchnorm_layers(model)
+    for m in frozen:
+        m.eval()
+    return len(frozen)
+
+
 def balanced_accuracy(confusion: torch.Tensor) -> float:
     """Mean recall over classes that occur in the targets (rows = true class)."""
     support = confusion.sum(dim=1)
@@ -78,9 +99,10 @@ def train_one_epoch(
 ) -> tuple[float, int, int]:
     """One pass over ``loader`` (stops early after ``max_steps`` optimizer steps).
 
-    Returns (mean training loss per sample, optimizer steps taken, samples seen).
+    Returns (mean training loss per sample, optimizer steps taken, samples seen). With class
+    weights in ``criterion`` the training loss is the class-weighted loss.
     """
-    model.train()
+    train_mode(model)  # re-applied every epoch: frozen BN layers stay in eval mode
     loss_sum, samples, steps = 0.0, 0, 0
     for inputs, targets in loader:
         if max_steps is not None and steps >= max_steps:

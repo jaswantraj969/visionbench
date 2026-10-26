@@ -9,7 +9,7 @@ from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-DATA_SUBDIRS = ("datasets", "artifacts", "db", "experiments", "cache")
+DATA_SUBDIRS = ("datasets", "artifacts", "db", "experiments", "cache", "reports")
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
@@ -36,9 +36,25 @@ class Settings(BaseSettings):
     report_samples_per_class: int = Field(default=8, ge=0)
     conflict_policy: Literal["exclude", "error"] = "exclude"
 
+    # torch.hub directory for pretrained weights (VISIONBENCH_TORCH_HOME); None -> data-root cache.
+    torch_home: Path | None = None
+
     @property
     def resolved_data_root(self) -> Path:
         return self.data_root.expanduser().resolve()
+
+    @property
+    def resolved_torch_home(self) -> Path:
+        """``torch_home`` if set, else ``<data_root>/cache/torch``."""
+        if self.torch_home is not None:
+            return self.torch_home.expanduser().resolve()
+        return self.resolved_data_root / "cache" / "torch"
+
+    def norm_stats_dir(self, dataset_id: str, split_id: str) -> Path:
+        """``<data_root>/cache/norm_stats/<dataset_id>/<split_id>`` (created on demand)."""
+        path = self.data_dir("cache") / "norm_stats" / dataset_id / split_id
+        path.mkdir(parents=True, exist_ok=True)
+        return path
 
     def data_dir(self, name: str) -> Path:
         """Return ``data_root/<name>``, creating it on demand."""
