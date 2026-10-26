@@ -5,13 +5,11 @@ from pathlib import Path
 
 import pytest
 import torch
+import vb_trainenv
 from torch.utils.data import DataLoader, TensorDataset
-from torchvision import models as tv_models
 
 from visionbench.core.config import Settings
 from visionbench.core.jsonio import read_json
-from visionbench.models import pretrained as pretrained_mod
-from visionbench.models.pretrained import file_sha256
 from visionbench.models.registry import build_model
 from visionbench.training import loop
 from visionbench.training.runner import run_training
@@ -19,23 +17,7 @@ from visionbench.training.runner import run_training
 CLASSES = ["a", "b", "c"]
 
 
-def _fake_weights(tmp_path: Path, monkeypatch) -> list[Path]:
-    """Serve a cached resnet18 state dict without network; record the hub dirs used."""
-    torch.manual_seed(0)
-    state = tv_models.resnet18(weights=None).state_dict()
-    tmp = tmp_path / "w.pth"
-    torch.save(state, tmp)
-    path = tmp_path / "fakehub" / f"resnet18-{file_sha256(tmp)[:8]}.pth"
-    path.parent.mkdir(parents=True)
-    tmp.rename(path)
-    seen: list[Path] = []
-
-    def fake_fetch(weights, hub_dir):
-        seen.append(Path(hub_dir))
-        return state, path
-
-    monkeypatch.setattr(pretrained_mod, "fetch_state_dict", fake_fetch)
-    return seen
+_fake_weights = vb_trainenv.fake_resnet18_weights
 
 
 def test_torch_home_setting(tmp_path: Path, monkeypatch) -> None:

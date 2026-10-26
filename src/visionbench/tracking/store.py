@@ -1,7 +1,8 @@
 """SQLite experiment store (SQLAlchemy) at ``<data_root>/db/visionbench.db``.
 
-Schema is created with ``create_all``; a ``schema_version`` table records the version (no
-migrations yet — a different stored version is an error). Status transitions are enforced:
+Schema is created with ``create_all``; a ``schema_version`` table records the version. The only
+supported upgrade is 1 -> 2 (M3 added the ``evaluations`` table, which ``create_all`` creates);
+any other stored version is an error. Status transitions are enforced:
 pending -> running -> completed | failed | cancelled (pending may also go to failed/cancelled).
 """
 
@@ -18,7 +19,8 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 from visionbench.core.errors import VisionBenchError
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+_ADDITIVE_UPGRADES = {1}  # versions upgraded by create_all alone (new tables only)
 DB_FILENAME = "visionbench.db"
 STATUSES = ("pending", "running", "completed", "failed", "cancelled")
 _TRANSITIONS = {
@@ -94,6 +96,18 @@ class Artifact(Base):
     created_at: Mapped[str] = mapped_column(String(32))
 
 
+class Evaluation(Base):
+    __tablename__ = "evaluations"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    experiment_id: Mapped[str] = mapped_column(ForeignKey("experiments.id"), index=True)
+    split: Mapped[str] = mapped_column(String(8))  # "val" | "test"
+    checkpoint: Mapped[str] = mapped_column(String(16))  # "best" | "last" | "baseline"
+    created_at: Mapped[str] = mapped_column(String(32))
+    metrics_path: Mapped[str] = mapped_column(String(255))  # relative to the data root
+    predictions_sha256: Mapped[str] = mapped_column(String(64))
+    visionbench_version: Mapped[str] = mapped_column(String(32))
+
+
 _EPOCH_FIELDS = (
     "epoch",
     "train_loss",
@@ -118,6 +132,9 @@ class ExperimentStore:
         with Session(self.engine) as s, s.begin():
             versions = s.scalars(select(SchemaVersion.version)).all()
             if not versions:
+                s.add(SchemaVersion(version=SCHEMA_VERSION, applied_at=utcnow()))
+            elif len(versions) == 1 and versions[0] in _ADDITIVE_UPGRADES:
+                s.delete(s.get(SchemaVersion, versions[0]))
                 s.add(SchemaVersion(version=SCHEMA_VERSION, applied_at=utcnow()))
             elif versions != [SCHEMA_VERSION]:
                 raise TrackingError(
@@ -241,3 +258,48 @@ class ExperimentStore:
         with Session(self.engine) as s:
             q = select(Artifact).where(Artifact.experiment_id == exp_id)
             return [_row(r) for r in s.scalars(q.order_by(Artifact.relpath))]
+
+    # --- evaluations ----------------------------------------------------------------------
+
+    def add_evaluation(
+        self,
+        *,
+        eval_id: str,
+        experiment_id: str,
+        split: str,
+        checkpoint: str,
+        metrics_path: str,
+        predictions_sha256: str,
+        visionbench_version: str,
+    ) -> None:
+        with Session(self.engine) as s, s.begin():
+            self._get(s, experiment_id)
+            s.add(
+                Evaluation(
+                    id=eval_id,
+                    experiment_id=experiment_id,
+                    split=split,
+                    checkpoint=checkpoint,
+                    created_at=utcnow(),
+                    metrics_path=metrics_path,
+                    predictions_sha256=predictions_sha256,
+                    visionbench_version=visionbench_version,
+                )
+            )
+
+    def evaluations(
+        self,
+        experiment_id: str | None = None,
+        *,
+        split: str | None = None,
+        checkpoint: str | None = None,
+    ) -> list[dict[str, Any]]:
+        with Session(self.engine) as s:
+            q = select(Evaluation)
+            if experiment_id is not None:
+                q = q.where(Evaluation.experiment_id == experiment_id)
+            if split is not None:
+                q = q.where(Evaluation.split == split)
+            if checkpoint is not None:
+                q = q.where(Evaluation.checkpoint == checkpoint)
+            return [_row(r) for r in s.scalars(q.order_by(Evaluation.created_at, Evaluation.id))]

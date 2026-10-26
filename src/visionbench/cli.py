@@ -294,6 +294,100 @@ def _cmd_experiments_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def _ci_text(value: Any, ci: dict[str, Any]) -> str:
+    return f"{_fmt(value)} [{_fmt(ci.get('low'))}, {_fmt(ci.get('high'))}]"
+
+
+def _cmd_evaluate(args: argparse.Namespace) -> int:
+    from visionbench.evaluation.evaluate import evaluate_experiment
+
+    def warn(message: str) -> None:
+        print(f"WARNING: {message}", file=sys.stderr)
+
+    r = evaluate_experiment(
+        args.experiment_id,
+        args.split,
+        _settings(),
+        checkpoint=args.checkpoint,
+        device=args.device,
+        batch_size=args.batch_size,
+        bootstrap_resamples=args.bootstrap,
+        seed=args.seed,
+        latency=not args.no_latency,
+        on_warning=warn,
+    )
+    doc, m = r.metrics, r.metrics["metrics"]
+    ci = doc["bootstrap"]["metrics"]
+    ck = doc["checkpoint"]
+    tu = doc["test_use"]
+    print(
+        f"evaluation {r.eval_id}: experiment {r.experiment_id} ({doc['model']}) on "
+        f"{r.split.upper()} with checkpoint '{ck['name']}' (epoch {ck['epoch']}, "
+        f"sha256 {ck['sha256'][:12]}...)"
+    )
+    print(f"  n={m['n']}  accuracy={_ci_text(m['accuracy'], ci['accuracy'])}")
+    print(
+        f"  balanced_accuracy={_ci_text(m['balanced_accuracy'], ci['balanced_accuracy'])}  "
+        f"(excluded absent classes: {m['balanced_accuracy_excluded_classes'] or 'none'})"
+    )
+    print(
+        f"  macro_f1={_ci_text(m['macro_f1'], ci['macro_f1'])}  "
+        f"weighted_f1={_fmt(m['weighted_f1'])}  log_loss={_fmt(m['log_loss'])}"
+    )
+    print(
+        f"  roc_auc_ovr_macro={_fmt(m['roc_auc_ovr_macro'])}  "
+        f"ap_macro={_fmt(m['average_precision_macro'])}  "
+        f"ece={_fmt(m['calibration']['ece'] if m['calibration'] else None)}"
+    )
+    if m["undefined"]:
+        print("  undefined (null): " + ", ".join(f"{k}={v}" for k, v in m["undefined"].items()))
+    print(
+        f"  CIs: {doc['bootstrap']['resamples']} bootstrap resamples, seed "
+        f"{doc['bootstrap']['seed']}"
+    )
+    print(
+        f"  test evaluations of this experiment+checkpoint before this one: "
+        f"{tu['prior_test_evaluations_same_checkpoint']}"
+    )
+    print(f"  outputs: {r.eval_dir}")
+    return 0
+
+
+def _cmd_compare(args: argparse.Namespace) -> int:
+    from visionbench.evaluation.compare import compare_experiments
+
+    report = compare_experiments(
+        args.experiment_ids,
+        args.split,
+        _settings(),
+        reference=args.reference,
+        resamples=args.bootstrap,
+        seed=args.seed,
+        note=args.note,
+    )
+    print(
+        f"comparison {report['report_id']} on {args.split.upper()}: "
+        f"{len(report['rows'])} experiments, reference {report['reference_experiment']}"
+    )
+    print(f"  json: {report['paths']['json']}")
+    print(f"  markdown: {report['paths']['markdown']}")
+    print(f"  confound flags: {', '.join(c['code'] for c in report['confounds']) or 'none'}")
+    return 0
+
+
+def _cmd_evaluations_list(args: argparse.Namespace) -> int:
+    with _open_store() as store:
+        rows = store.evaluations(args.experiment_id)
+    if not rows:
+        print("no evaluations")
+    for r in rows:
+        print(
+            f"{r['id']}  {r['experiment_id']}  split={r['split']:4s}  "
+            f"checkpoint={r['checkpoint']:8s}  {r['created_at']}  {r['metrics_path']}"
+        )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     from visionbench import __version__
 
@@ -388,6 +482,43 @@ def build_parser() -> argparse.ArgumentParser:
     eshow.add_argument("experiment_id")
     eshow.add_argument("--json", action="store_true", help="print record, epochs, artifacts")
     eshow.set_defaults(func=_cmd_experiments_show)
+
+    ev = sub.add_parser(
+        "evaluate", parents=[common], help="evaluate a trained experiment on val or test (recorded)"
+    )
+    ev.add_argument("experiment_id")
+    ev.add_argument("--split", choices=["val", "test"], required=True)
+    ev.add_argument(
+        "--checkpoint",
+        choices=["best", "last"],
+        default="best",
+        help="best = val-selected (default); last is recorded as such",
+    )
+    ev.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
+    ev.add_argument("--batch-size", type=int, default=64)
+    ev.add_argument("--bootstrap", type=int, default=1000, help="bootstrap resamples for CIs")
+    ev.add_argument("--seed", type=int, default=0, help="bootstrap seed")
+    ev.add_argument("--no-latency", action="store_true", help="skip latency measurement")
+    ev.set_defaults(func=_cmd_evaluate)
+
+    cmp_ = sub.add_parser("compare", parents=[common], help="compare evaluated experiments")
+    cmp_.add_argument("experiment_ids", nargs="+")
+    cmp_.add_argument("--split", choices=["val", "test"], required=True)
+    cmp_.add_argument(
+        "--reference",
+        help="experiment for paired differences "
+        "(default: majority baseline if present, else first)",
+    )
+    cmp_.add_argument("--bootstrap", type=int, default=1000)
+    cmp_.add_argument("--seed", type=int, default=0)
+    cmp_.add_argument("--note", help="text shown at the top of the report")
+    cmp_.set_defaults(func=_cmd_compare)
+
+    evs = sub.add_parser("evaluations", parents=[common], help="list recorded evaluations")
+    evsub = evs.add_subparsers(dest="evaluations_command", required=True)
+    evl = evsub.add_parser("list", parents=[common], help="list evaluations")
+    evl.add_argument("experiment_id", nargs="?")
+    evl.set_defaults(func=_cmd_evaluations_list)
     return parser
 
 

@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 import vb_synth
+import vb_trainenv
 
 from visionbench.data.scan import ScanConfig
 
@@ -34,6 +35,12 @@ def balanced_src(tmp_path: Path) -> Path:
 @pytest.fixture
 def make_images() -> Callable[..., None]:
     return vb_synth.make_images
+
+
+@pytest.fixture
+def train_env(tmp_path: Path) -> vb_trainenv.TrainEnv:
+    """Shapes dataset (3 classes x 12 images, 32 px) imported and split 0.5/0.25/0.25."""
+    return vb_trainenv.make_train_env(tmp_path)
 
 
 def pytest_terminal_summary(

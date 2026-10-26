@@ -1,4 +1,4 @@
-"""Fixtures for training tests: a tiny learnable shapes dataset, imported and split."""
+"""Shared helper: a tiny learnable shapes dataset, imported and split (fixture in conftest)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import pytest
 import vb_synth
 
 from visionbench.core.config import Settings
@@ -44,8 +43,7 @@ class TrainEnv:
         return TrainConfig.model_validate(base | overrides)
 
 
-@pytest.fixture
-def train_env(tmp_path: Path) -> TrainEnv:
+def make_train_env(tmp_path: Path) -> TrainEnv:
     src = vb_synth.build_shapes(tmp_path / "src", per_class=12, size=32)
     settings = Settings(_env_file=None, data_root=tmp_path / "var")
     datasets = settings.data_dir("datasets")
@@ -56,3 +54,29 @@ def train_env(tmp_path: Path) -> TrainEnv:
     return TrainEnv(
         settings, imported.dataset_id, split.split_id, split.path, imported.path / "raw"
     )
+
+
+def fake_resnet18_weights(tmp_path: Path, monkeypatch: Any) -> list[Path]:
+    """Serve a cached (randomly initialized) resnet18 state dict as "imagenet" weights without
+    network access. Returns the list of hub dirs the loader was called with."""
+    import torch
+    from torchvision import models as tv_models
+
+    from visionbench.models import pretrained as pretrained_mod
+    from visionbench.models.pretrained import file_sha256
+
+    torch.manual_seed(0)
+    state = tv_models.resnet18(weights=None).state_dict()
+    tmp = tmp_path / "w.pth"
+    torch.save(state, tmp)
+    path = tmp_path / "fakehub" / f"resnet18-{file_sha256(tmp)[:8]}.pth"
+    path.parent.mkdir(parents=True)
+    tmp.rename(path)
+    seen: list[Path] = []
+
+    def fake_fetch(weights: Any, hub_dir: Path) -> tuple[dict[str, Any], Path]:
+        seen.append(Path(hub_dir))
+        return state, path
+
+    monkeypatch.setattr(pretrained_mod, "fetch_state_dict", fake_fetch)
+    return seen
