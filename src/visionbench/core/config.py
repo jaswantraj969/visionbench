@@ -26,6 +26,14 @@ class Settings(BaseSettings):
     max_upload_mb: int = Field(default=200, gt=0, description="Upper bound for uploads in MB.")
     log_level: LogLevel = "INFO"
 
+    # Dataset ingestion / duplicate detection / splitting defaults (CLI flags override).
+    max_image_pixels: int = Field(default=50_000_000, gt=0)
+    min_images_per_class: int = Field(default=3, ge=1)
+    dhash_threshold: int = Field(default=5, ge=0, le=64)
+    low_info_std_threshold: float = Field(default=3.0, ge=0)
+    report_samples_per_class: int = Field(default=8, ge=0)
+    conflict_policy: Literal["exclude", "error"] = "exclude"
+
     @property
     def resolved_data_root(self) -> Path:
         return self.data_root.expanduser().resolve()

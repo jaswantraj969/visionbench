@@ -13,6 +13,7 @@ Determinism notes:
 
 from __future__ import annotations
 
+import hashlib
 import os
 import random
 from typing import Any
@@ -51,3 +52,13 @@ def set_seed(seed: int, deterministic: bool = True) -> dict[str, Any]:
         "cudnn_benchmark": torch.backends.cudnn.benchmark,
         "torch_deterministic_algorithms": torch.are_deterministic_algorithms_enabled(),
     }
+
+
+def derived_rng(seed: int, key: str) -> np.random.Generator:
+    """Return a NumPy Generator seeded from ``(seed, key)``.
+
+    The key is mixed in via SHA-256 (not Python's salted ``hash()``), so the stream is the same
+    in every process and on every platform for a given NumPy version.
+    """
+    key_int = int.from_bytes(hashlib.sha256(key.encode("utf-8")).digest()[:8], "big")
+    return np.random.default_rng(np.random.SeedSequence([seed, key_int]))
