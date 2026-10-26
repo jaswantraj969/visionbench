@@ -17,6 +17,7 @@ from visionbench.core.errors import VisionBenchError
 
 if TYPE_CHECKING:
     from visionbench.core.config import Settings
+    from visionbench.tracking.store import ExperimentStore
 
 
 def _settings() -> Settings:
@@ -181,6 +182,118 @@ def _cmd_dataset_split(args: argparse.Namespace) -> int:
     return 0
 
 
+_TRAIN_FLAGS: tuple[tuple[str, type], ...] = (
+    ("--dataset-id", str),
+    ("--split-id", str),
+    ("--model", str),
+    ("--weights", str),
+    ("--finetune", str),
+    ("--input-size", int),
+    ("--epochs", int),
+    ("--max-steps", int),
+    ("--batch-size", int),
+    ("--optimizer", str),
+    ("--lr", float),
+    ("--weight-decay", float),
+    ("--scheduler", str),
+    ("--seed", int),
+    ("--device", str),
+    ("--num-workers", int),
+)
+
+
+def _fmt(value: Any, spec: str = ".4f") -> str:
+    return "-" if value is None else format(value, spec)
+
+
+def _cmd_train(args: argparse.Namespace) -> int:
+    from visionbench.training.config import load_train_config, parse_override
+    from visionbench.training.runner import run_training
+
+    overrides: dict[str, Any] = {
+        flag[2:].replace("-", "_"): getattr(args, flag[2:].replace("-", "_"))
+        for flag, _ in _TRAIN_FLAGS
+    }
+    overrides["amp"] = args.amp
+    overrides["allow_weight_fallback"] = args.allow_weight_fallback
+    for item in args.set:
+        key, value = parse_override(item)
+        overrides[key] = value
+    config = load_train_config(args.config, overrides)
+
+    def on_start(exp_id: str, run_dir: Path) -> None:
+        print(f"experiment {exp_id} running ({config.model}, seed={config.seed})")
+        print(f"  run dir: {run_dir}")
+
+    def on_epoch(r: dict[str, Any]) -> None:
+        print(
+            f"  epoch {r['epoch']:3d}  train_loss={_fmt(r['train_loss'])}  "
+            f"val_loss={_fmt(r['val_loss'])}  val_acc={_fmt(r['val_accuracy'])}  "
+            f"val_bal_acc={_fmt(r['val_balanced_accuracy'])}  lr={_fmt(r['lr'], '.2e')}  "
+            f"{r['epoch_seconds']:.2f}s{'  *best' if r.get('is_best') else ''}"
+        )
+
+    result = run_training(config, _settings(), on_start=on_start, on_epoch=on_epoch)
+    print(
+        f"experiment {result.experiment_id}: {result.status} "
+        f"(stopped: {result.stopped_reason}; best epoch {result.best_epoch}, "
+        f"best {config.early_stopping.monitor}={_fmt(result.best_value)})"
+    )
+    return 0
+
+
+def _open_store() -> ExperimentStore:
+    from visionbench.tracking.store import DB_FILENAME, ExperimentStore
+
+    return ExperimentStore(_settings().data_dir("db") / DB_FILENAME)
+
+
+def _cmd_experiments_list(_: argparse.Namespace) -> int:
+    with _open_store() as store:
+        rows = store.list()
+    if not rows:
+        print("no experiments")
+    for r in rows:
+        weights = r["weights_source"] or "-"
+        best_epoch = r["best_epoch"] or "-"
+        print(
+            f"{r['id']}  {r['status']:9s}  {r['model']:17s}  weights={weights:8s}  "
+            f"seed={r['seed']}  best_epoch={best_epoch}  best={_fmt(r['best_metric'])}  "
+            f"{r['dataset_id']}/{r['split_id']}  {r['created_at']}"
+        )
+    return 0
+
+
+def _cmd_experiments_show(args: argparse.Namespace) -> int:
+    with _open_store() as store:
+        record = store.get(args.experiment_id)
+        epochs = store.epochs(args.experiment_id)
+        artifacts = store.artifacts(args.experiment_id)
+    if args.json:
+        print(
+            json.dumps(
+                {"experiment": record, "epochs": epochs, "artifacts": artifacts},
+                indent=2,
+                default=str,
+            )
+        )
+        return 0
+    skip = {"config_json", "env_json"}
+    for key, value in record.items():
+        if key not in skip:
+            print(f"{key}: {value}")
+    print("epochs:")
+    for e in epochs:
+        print(
+            f"  {e['epoch']:3d}  train_loss={_fmt(e['train_loss'])}  "
+            f"val_loss={_fmt(e['val_loss'])}  val_bal_acc={_fmt(e['val_balanced_accuracy'])}"
+        )
+    print("artifacts:")
+    for a in artifacts:
+        print(f"  {a['kind']:15s} {a['relpath']}  {a['size_bytes']} B  sha256={a['sha256']}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     from visionbench import __version__
 
@@ -244,6 +357,37 @@ def build_parser() -> argparse.ArgumentParser:
     spl.add_argument("--conflict-policy", choices=["exclude", "error"])
     spl.add_argument("--allow-missing-classes", action="store_true")
     spl.set_defaults(func=_cmd_dataset_split)
+
+    trn = sub.add_parser("train", parents=[common], help="train one model on a split (explicit)")
+    trn.add_argument("--config", type=Path, help="YAML training config")
+    trn.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="override any config key (dotted, YAML value), e.g. "
+        "early_stopping.patience=3; repeatable",
+    )
+    for flag, kind in _TRAIN_FLAGS:
+        trn.add_argument(flag, type=kind)
+    trn.add_argument("--amp", action=argparse.BooleanOptionalAction, default=None)
+    trn.add_argument(
+        "--allow-weight-fallback",
+        action="store_true",
+        default=None,
+        help="if pretrained weights cannot be obtained, train from scratch "
+        "(recorded as weights=scratch) instead of failing",
+    )
+    trn.set_defaults(func=_cmd_train)
+
+    exps = sub.add_parser("experiments", parents=[common], help="list/show tracked experiments")
+    esub = exps.add_subparsers(dest="experiments_command", required=True)
+    elist = esub.add_parser("list", parents=[common], help="list experiments")
+    elist.set_defaults(func=_cmd_experiments_list)
+    eshow = esub.add_parser("show", parents=[common], help="show one experiment")
+    eshow.add_argument("experiment_id")
+    eshow.add_argument("--json", action="store_true", help="print record, epochs, artifacts")
+    eshow.set_defaults(func=_cmd_experiments_show)
     return parser
 
 
@@ -255,6 +399,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)
+    except KeyboardInterrupt:
+        print("cancelled (KeyboardInterrupt)", file=sys.stderr)
+        return 130
     except Exception as exc:
         if args.debug:
             traceback.print_exc()
