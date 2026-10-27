@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased: D1 EuroSAT onboarding (2026-10-27/28)
+
+### Added
+- `visionbench.data.imageio`: the single image decoder. It decodes fully and applies
+  `ImageOps.exif_transpose`. Used by the scan, training/evaluation `load_image` and the audit.
+- `visionbench.data.phash`: in-house 64-bit DCT pHash (`phash-v1`; 32x32 gray, DCT-II, top-left
+  8x8, median of the 63 AC coefficients, DC bit 0).
+- `visionbench dataset audit-split <dataset_id> <split_id> [--seed]`
+  (`visionbench.data.audit`), an independent leakage audit:
+  - nearest train image of every val/test image by pHash and by dHash, over all images;
+  - histograms, the consistency check, near-miss band, cross-split exact and decoded-pixel
+    matches, group statistics;
+  - `pairs.csv` and labelled contact sheets, under `datasets/<id>/audits/<split_id>/`.
+- Oversized-group warnings (`split.group_size_stats`): multi-member groups larger than the
+  class val target or 2 % of the class. Written to `split_info.json`
+  (`group_size_warnings`) and printed by `dataset split`.
+- `report.json` format 2: low-information images per class and per reason (std / degenerate /
+  popcount), printed by `dataset import` and `dataset report`.
+- `DATASETS.md`: EuroSAT RGB source, MIT license, Copernicus attribution, citations, download
+  record.
+- Dependency: `scipy` declared (DCT for pHash; it was already installed through scikit-learn).
+
+### Changed
+- Dataset format version 2, hash version 2. Dimensions, gray std and dHash are computed after
+  EXIF orientation. `dataset.json` and `files.json` carry
+  `format_version` / `orientation` / `hash_version`. Format-1 snapshots are refused with a
+  request to re-import (`DatasetFormatError`).
+- `SplitResult` has a `group_warnings` field.
+
+### Data (not committed)
+- EuroSAT RGB downloaded from Zenodo record 7711810. The MD5 matches the record.
+- Imported as `ds-61112928e412`; `verify --full` OK.
+- Nine calibration splits and two audits (thresholds 3 and 5) created under `var/`. No
+  threshold was chosen; no training or evaluation was run.
+
 ## Unreleased: M4.1 process-safety and local-API security hardening (2026-10-27)
 
 ### Fixed

@@ -37,6 +37,18 @@ This protocol governs all benchmarks. Status per section: **implemented (M1)**, 
   is written.
 - Paths are stored as `<class>/<file>`: POSIX separators, Unicode NFC. Directories are visited in
   sorted order, so no result depends on filesystem listing order.
+- **EXIF orientation policy (D1, dataset format 2, hash version 2).** Pixels are read in exactly
+  one place, `visionbench.data.imageio.decode_image`. It decodes fully and applies
+  `PIL.ImageOps.exif_transpose`, so every consumer sees the image as meant to be displayed:
+  - the scan (recorded width/height, gray std, dHash);
+  - training and evaluation (`training.data.load_image`);
+  - the split audit (pHash, decoded-pixel digest, contact sheets).
+
+  A JPEG stored sideways with `Orientation=6` and a physically rotated copy without EXIF get
+  identical dimensions, hashes and pixels (tested). SHA-256 values remain those of the original
+  file bytes. `dataset.json` and `files.json` record `format_version: 2`,
+  `orientation: "exif_transposed"` and `hash_version: 2`. Snapshots written in another format
+  are refused with a request to re-import; only synthetic data existed in format 1.
 
 ## 2. Snapshot and fingerprint (implemented, M1)
 
@@ -80,6 +92,8 @@ This protocol governs all benchmarks. Status per section: **implemented (M1)**, 
   - Policy `error`: the split is refused.
   - Labels are never changed.
 - **Same-class duplicates** stay in the dataset, and their group is always assigned to one split.
+- `report.json` (format 2) lists the low-information images per class with the reasons that
+  apply: `std`, `degenerate`, `popcount`. The reasons overlap; one image can fail several tests.
 
 ## 4. Splits (implemented; algorithm `vb-split-v2` since M2)
 
@@ -109,6 +123,82 @@ Manifest fields:
 - `entries`: one per file, with `relpath`, `label`, `sha256`, `group_id`, `split`.
 - Metadata: `config`, per-class `counts` and `target_counts`, `split_totals`, `excluded`,
   `warnings`, `leakage_check`, `algorithm`, `visionbench_version`, `dataset_fingerprint`.
+
+**Oversized-group warnings (D1).** A multi-member group is reported if it is larger than its
+class's **val target** (`fraction_val x class_total`) or larger than **2 % of its class**. A
+group is never split, so such a group can unbalance a split or concentrate one scene in one
+split. The warnings are computed from the manifest (`split.group_size_stats`). They are written
+to `split_info.json` (`group_size_warnings`) and printed by `dataset split`. They are **not**
+part of `manifest.json`, so manifest bytes and split ids of existing configurations do not
+change. Singletons are never reported.
+
+## 4a. Independent split audit (implemented, D1)
+
+`visionbench dataset audit-split <dataset_id> <split_id>` checks a split for cross-split
+leakage **without trusting the duplicate grouping that produced it**. Outputs go to
+`<data_root>/datasets/<id>/audits/<split_id>/` (`audit.json`, `audit.md`, `pairs.csv`,
+`sheets/*.png`). Nothing is written into the write-once split directory.
+
+1. Every image of the split is decoded again (orientation policy above).
+2. **Independent detector, pHash (`phash-v1`, in-house):**
+   - grayscale, Lanczos resize to 32x32;
+   - 2-D DCT-II (`scipy.fft.dctn`, orthonormal), keeping the top-left 8x8;
+   - each coefficient is compared with the median of the 63 AC coefficients (the DC term is
+     excluded and its bit is always 0).
+
+   It is computed for **all** images, low-information ones included. Because a median splits
+   the 63 AC values into exactly 31 above and 32 below, every pHash has popcount 31, and **all
+   pHash distances are even**. This is a property of the method, not an error.
+3. The dHash is used again, over **all** images (low-information ones included and flagged).
+4. For every **val and test** image, the audit finds the nearest **train** image by pHash and
+   by dHash. Ties go to the first train image by relpath.
+5. Reported:
+   - distance histograms 0..16 (and >16) for both hashes, separately for informative and
+     low-information query images;
+   - the **consistency check**: informative val/test images whose nearest *informative* train
+     image is within the dHash threshold. This must be 0 by construction; a non-zero value
+     means a split bug;
+   - val/test images whose nearest train image (low-info included) is within the threshold,
+     broken down by which side is low-information. These are pairs the grouping could not see;
+   - near-miss counts in the band threshold+1 .. threshold+3 (informative images);
+   - cross-split exact SHA-256 matches (must be 0) and cross-split decoded-pixel matches
+     (SHA-256 of the decoded RGB bytes, which catches re-encoded identical images);
+   - group statistics (size distribution, largest group per class vs its val/test targets,
+     oversized groups as above).
+6. Pairs for visual inspection (`pairs.csv` and labelled contact sheets, at most 20 pairs per
+   PNG; each pair shows pair id, classes, splits, low-info flags and both distances):
+   - (a) the 60 closest cross-split pairs by pHash (each val/test image with its nearest
+     train image);
+   - (b) up to 40 seeded within-group pairs per dHash distance 1..threshold (informative
+     members), to judge false positives;
+   - (c) up to 40 seeded cross-split pairs from the near-miss band, to judge false negatives;
+   - (d) up to 20 seeded low-information images per class.
+
+   Contact sheets contain dataset images and are never committed.
+
+## 4b. Threshold calibration procedure (D1)
+
+The duplicate thresholds for a real dataset are chosen by the supervisor from evidence, not by
+the implementer:
+
+1. Import with the current defaults and record the import statistics (low-information counts
+   per class and reason, groups).
+2. Create splits with seed 0 and fractions 0.7/0.15/0.15 for dHash thresholds {0, 2, 3, 5, 8}
+   at the default low-information settings. Add threshold 5 with popcount bounds {[4,60],
+   [12,52]} and std thresholds {1.5, 6.0}; [8,56] and 3.0 are the defaults, so those runs
+   would be duplicates.
+3. Tabulate for each run:
+   - multi-member groups;
+   - largest group per class;
+   - low-information images;
+   - label-conflict groups;
+   - oversized-group warnings;
+   - split counts.
+4. Run `audit-split` on the candidate thresholds and inspect the contact sheets.
+5. The supervisor records the decision and its reasons. The chosen configuration is then fixed
+   for all benchmark splits of that dataset.
+
+The EuroSAT evidence is in REVIEW_PACKET.md (task VB-D1). No threshold has been chosen yet.
 
 ## 5. Seeds and determinism (implemented, M2)
 Each training run does the following before building the model:
@@ -329,10 +419,14 @@ model performance.
 - Balanced accuracy averages recall over the classes **present in val**. A class with no val images
   is left out of the mean.
 - The majority baseline floors zero priors at 1e-12 when computing loss.
-- Images are used in stored pixel orientation: neither dHash (M1) nor training/evaluation loading
-  applies EXIF orientation (`ImageOps.exif_transpose` is not called). Photos whose orientation is
-  only encoded in EXIF are seen rotated, consistently across duplicate detection, training and
-  evaluation.
+- Since D1 every pixel consumer applies EXIF orientation (section 1). Other EXIF/ICC metadata
+  (color profiles) is not applied.
+- pHash (audit only) and dHash both miss crops, flips and strong color edits. pHash distances
+  are always even (section 4a).
+- Near-uniform images (open water, dense canopy) defeat both perceptual hashes: their hashes are
+  driven by noise and compression artefacts. On EuroSAT many Forest and SeaLake images are
+  low-information (REVIEW_PACKET.md), so near-duplicates among them are not detectable by
+  hashing.
 - Bootstrap CIs on small evaluation sets are coarse; with 54 test images a single error moves
   accuracy by ~0.019. Perfect predictions give a degenerate CI [1, 1], which does not mean the
   true error rate is zero.

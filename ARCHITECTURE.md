@@ -35,8 +35,11 @@ contain no ML logic.
 | `jobs.worker` | implemented (M4, M4.1) | OS lock, recovery, claim loop, child process, heartbeat, cancel, timeouts |
 | `data.archive` | implemented (M4) | ZIP validation (central directory), safe extraction, upload import, `import_root` confinement |
 | `evaluation.latency` | implemented (M4 step 0) | split-independent latency measurement (`latency_measurements` table) |
-| `cli` | implemented (M0–M4) | `env`; `dataset import\|report\|verify\|split\|list`; `train`; `experiments list\|show`; `evaluate`; `latency`; `compare`; `evaluations list`; `worker`; `serve` |
+| `cli` | implemented (M0–M4, D1) | `env`; `dataset import\|report\|verify\|split\|list\|audit-split`; `train`; `experiments list\|show`; `evaluate`; `latency`; `compare`; `evaluations list`; `worker`; `serve` |
 | `data.records` | implemented (M1) | `FileRecord`, `Issue`/`IssueCategory`, NFC names, fingerprint |
+| `data.imageio` | implemented (D1) | the one image decoder: full decode + EXIF orientation (`exif_transposed`) |
+| `data.phash` | implemented (D1) | in-house 64-bit DCT pHash (audit only) |
+| `data.audit` | implemented (D1) | independent split audit: nearest-train search, histograms, pair samples, contact sheets |
 | `data.scan` | implemented (M1) | source validation, Pillow decode checks, symlink/junction refusal |
 | `data.hashing` | implemented (M1) | 64-bit dHash, vectorized near-duplicate edge search |
 | `data.grouping` | implemented (M1) | union-find duplicate groups, low-information guard, conflicts |
@@ -70,15 +73,20 @@ Default `./var/` (gitignored), overridable with `VISIONBENCH_DATA_ROOT`:
 var/
   datasets/                          (M1, implemented)
     <dataset_id>/                    ds-<12 hex>; immutable once renamed into place
-      dataset.json                   name, id, created_at, source_path, fingerprint, classes,
-                                     counts, import config, validation summary
+      dataset.json                   format_version (2), orientation, hash_version, name, id,
+                                     created_at, source_path, fingerprint, classes, counts,
+                                     import config, validation summary
       report.json                    statistics, issues (+relpaths), duplicate groups, samples
-      files.json                     per accepted image: relpath, label, sha256, size, w/h,
-                                     mode, format, dhash (hex), gray_std
+      files.json                     format header + per accepted image: relpath, label,
+                                     sha256, size, w/h (after EXIF orientation), mode, format,
+                                     dhash (hex), gray_std
       raw/<class>/<file>             byte-identical copies of accepted images
       splits/<split_id>/             sp-<12 hex>
         manifest.json                canonical, byte-reproducible (no timestamps)
-        split_info.json              created_at, manifest sha256, numpy/python versions
+        split_info.json              created_at, manifest sha256, numpy/python versions,
+                                     group_size_warnings (D1)
+      audits/<split_id>/             (D1) audit.json, audit.md, pairs.csv, sheets/*.png;
+                                     replaced on re-run; never inside splits/
     .tmp-import-*/  .tmp-split-*/    staging dirs; renamed into place on success, removed on error
   experiments/                       (M2, implemented)
     <exp_id>/                        exp-<YYYYMMDD-HHMMSS>-<6 hex>
@@ -102,6 +110,8 @@ var/
                                      (M3 step 0) train-only mean/std cache per resolution;
                                      split directories are never written after creation
   reports/<report_id>/               (M3) rp-...: comparison.json, comparison.md
+  downloads/                         (D1) official dataset archives + their extraction
+                                     (not managed by Settings; see DATASETS.md)
   artifacts/                         reserved (M5+: Grad-CAM maps)
 ```
 
@@ -111,9 +121,11 @@ Subdirectories are created on first use (`Settings.data_dir()`), never at import
 
 `visionbench dataset import <src> --name N` runs the following:
 
-1. `scan_source` (sorted, NFC). Each accepted file is read **once**. Those bytes are SHA-256
-   hashed, decoded twice (`verify()`, then reopen and `load()`), dHashed, and passed to a sink that
-   writes them into a staging directory.
+1. `scan_source` (sorted, NFC). Each accepted file is read **once**. Those bytes are
+   SHA-256 hashed, then decoded twice: `verify()`, then a full decode through
+   `data.imageio.decode_image`, which applies EXIF orientation. Dimensions, gray std and dHash
+   are taken from the oriented image. The bytes are then passed to a sink that writes them
+   into a staging directory.
 2. `check_requirements`: at least 2 classes, and at least `min_images_per_class` per class.
 3. Fingerprint, then `dataset_id`. The import is refused if the id already exists.
 4. `build_groups` + `build_report`, then `files.json` / `report.json` / `dataset.json`.
@@ -131,6 +143,24 @@ Notes:
   single-worker and runs each job in its own process.
 - `dataset.json.source_path` is local metadata. The API never returns it (uploads record
   `upload:<filename>`, path imports `import_root:<relpath>`).
+- `data.imageio.decode_image` is the only function that turns image bytes into pixels.
+  `training.data.load_image` (the patched choke point in tests), the audit and the scan all
+  call it.
+- `load_dataset` / `load_records` refuse snapshots whose format header (`format_version`,
+  `orientation`, `hash_version`) differs from the current one (`DatasetFormatError`, which
+  asks for a re-import).
+- `split.group_size_stats(manifest)` gives the group-size distribution, the largest group per
+  class and the oversized groups. `make_split` writes the oversized groups to
+  `split_info.json`; the audit reuses the same function.
+- `dataset audit-split` (`data.audit.audit_split`):
+  1. reads the manifest and records;
+  2. decodes every entry (pHash + decoded-pixel digest);
+  3. runs chunked nearest-neighbour searches (val/test against train, NumPy XOR + popcount);
+  4. samples pairs with `derived_rng(seed, ...)`;
+  5. renders the contact sheets with Pillow (tiles upscaled with NEAREST);
+  6. writes everything to a staging directory that replaces `audits/<split_id>/`.
+
+  Cost on EuroSAT (27,000 images of 64x64): about 30 s per audit.
 - The snapshot is "immutable" because it is never overwritten and its hashes are recorded. Files
   are not made read-only. `dataset verify [--full]` (M2) detects missing, resized, unrecorded and
   (with `--full`) altered files.

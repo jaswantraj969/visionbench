@@ -1,6 +1,6 @@
 # Project Status
 
-_Last updated: 2026-10-27, end of M4.1 (process-safety and local-API hardening; pending supervisor review)._
+_Last updated: 2026-10-28, end of D1 (EuroSAT onboarding; pending supervisor review and the threshold decision)._
 
 ## Current state
 - **M0:** foundation (config, seeding, env info, health/ready API).
@@ -44,12 +44,27 @@ _Last updated: 2026-10-27, end of M4.1 (process-safety and local-API hardening; 
   - the API rejects foreign `Host` headers (400), and POST/PUT/PATCH/DELETE without
     `X-VisionBench-Request: 1` (403) or with a foreign `Origin` (403); `nosniff` on every
     response.
+- **D1** (EuroSAT onboarding, no training or evaluation):
+  - EXIF orientation policy: one shared decoder; dataset format 2, hash version 2; format-1
+    snapshots are refused with a request to re-import;
+  - `dataset audit-split`: an independent leakage audit (in-house DCT pHash + dHash over all
+    images, histograms, consistency check, near misses, exact and decoded-pixel matches,
+    group statistics, pairs.csv, contact sheets);
+  - oversized-group warnings in `split_info.json` and the `split` output;
+  - low-information breakdown per class and reason in `report.json`;
+  - EuroSAT RGB license verified (MIT + Copernicus attribution; DATASETS.md), downloaded from
+    Zenodo (MD5 matches), imported as `ds-61112928e412` (27,000 images, `verify --full` OK);
+  - 9 calibration splits and audits for dHash thresholds 3 and 5. **The thresholds have not
+    been chosen**; the supervisor decides from REVIEW_PACKET.md.
 - There is no authentication, Grad-CAM, robustness suite, or frontend.
 
 ## Verified in session (2026-10-27, Windows 11, Python 3.11.15, torch 2.14.1+cu130, RTX 3050 6GB)
 - `ruff check .` and `ruff format --check .` pass.
-- `pytest -q --cov=visionbench` (M4.1): 270 passed and 1 skipped (file symlink) in 369.49 s, coverage 94%. With
-  `CUDA_VISIBLE_DEVICES=-1`: 270 passed and 1 skipped in 354.62 s (in-process `torch.cuda.is_available()=False`).
+- `pytest -q --cov=visionbench` (D1): 285 passed and 1 skipped (file symlink) in 511.76 s,
+  coverage 94%. With `CUDA_VISIBLE_DEVICES=-1`: 285 passed and 1 skipped in 539.21 s
+  (in-process `torch.cuda.is_available()=False`). New modules: `data/audit.py` 94%,
+  `data/phash.py` 100%, `data/imageio.py` 100%.
+- M4.1 (unchanged since): 270 passed / 1 skipped in both modes.
   Coverage now includes the worker subprocesses and their spawn children: `jobs/worker.py`
   87% (was 51% in M4).
 - Real-worker tests: one job at a time, progress, cooperative cancel, terminate-after-timeout
@@ -74,10 +89,15 @@ _Last updated: 2026-10-27, end of M4.1 (process-safety and local-API hardening; 
   not run on POSIX.
 - Concurrency beyond one API process + one worker; very large uploads (limits are tested with
   small values).
-- Real (non-synthetic) datasets; Python 3.12/3.13.
+- Python 3.12/3.13.
+- Training or evaluation on a real dataset: not started (EuroSAT is imported and audited only).
+- The audit does not search near-duplicates within val/test or between val and test by
+  perceptual hash, only val/test against train. Near-uniform EuroSAT tiles (3357
+  low-information images, mostly SeaLake and Forest) cannot be checked by hashing.
 
 ## Blockers
-None.
+- Waiting for the supervisor's choice of the dHash and low-information thresholds for EuroSAT.
+- The Copernicus attribution `[Year]` is not stated by the dataset source (DATASETS.md).
 
 ## Next task
 M5: Grad-CAM for registry CNNs (overlays as artifacts, randomized-weights sanity check), run

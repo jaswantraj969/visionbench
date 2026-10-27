@@ -1,7 +1,8 @@
 # VisionBench
 
 Reproducible computer-vision benchmarking and explainability platform. **Current state: milestone
-M4 (FastAPI backend, single-worker job runner, secure dataset upload)**. See
+M4 (FastAPI backend, single-worker job runner, secure dataset upload) plus D1 (first real
+dataset, EuroSAT RGB, imported and audited; duplicate thresholds not yet chosen)**. See
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for what comes next.
 
 ## What exists now
@@ -21,7 +22,7 @@ M4 (FastAPI backend, single-worker job runner, secure dataset upload)**. See
 - FastAPI backend under `/api` (datasets, uploads, splits, experiments, evaluations, latency,
   comparisons, jobs) and a single-worker job runner: every training/evaluation/import runs
   as a queued job in a separate process, with progress, cancel and crash recovery.
-- CLI: `visionbench env`, `dataset import|report|verify|split|list`, `train`,
+- CLI: `visionbench env`, `dataset import|report|verify|split|list|audit-split`, `train`,
   `experiments list|show`, `evaluate`, `latency`, `compare`, `evaluations list`, `worker`,
   `serve`.
 - Tests (pytest) and lint (ruff).
@@ -99,6 +100,7 @@ symlinks/junctions (never followed), nested folders, and name collisions.
 .\.venv\Scripts\visionbench.exe dataset verify ds-xxxxxxxxxxxx          # add --full to re-hash files
 .\.venv\Scripts\visionbench.exe dataset report ds-xxxxxxxxxxxx          # add --json for everything
 .\.venv\Scripts\visionbench.exe dataset split ds-xxxxxxxxxxxx --seed 42 --fractions 0.7 0.15 0.15
+.\.venv\Scripts\visionbench.exe dataset audit-split ds-xxxxxxxxxxxx sp-xxxxxxxxxxxx   # leakage audit
 ```
 
 - `import` copies accepted images into `<data_root>/datasets/<id>/raw/` and writes
@@ -112,8 +114,23 @@ symlinks/junctions (never followed), nested folders, and name collisions.
   config always produce a byte-identical manifest. Duplicate groups never span splits, and the
   manifest records a computed leakage check. Optional flags: `--conflict-policy exclude|error`,
   `--allow-missing-classes`, `--dhash-threshold`, `--low-info-std`, `--low-info-popcount-min`,
-  `--low-info-popcount-max`.
+  `--low-info-popcount-max`. It also prints **oversized-group warnings**: multi-member groups
+  larger than their class's val target or larger than 2 % of the class. These are recorded in
+  `split_info.json`, not in the manifest.
+- `audit-split` re-checks a split **without trusting its duplicate grouping**. It decodes every
+  image and uses an independent DCT pHash plus the dHash over all images, low-information
+  ones included. For each val/test image it finds the nearest train image and reports
+  distance histograms, a consistency check, near misses, cross-split exact and
+  pixel-identical matches, and group statistics. It writes `audit.json`, `audit.md`,
+  `pairs.csv` and labelled contact sheets to `<data_root>/datasets/<id>/audits/<split_id>/`;
+  the split directory is never touched. `--seed` (default 0) controls the sampled pairs. The
+  contact sheets contain dataset images, so do not commit them.
+- Images are read with their EXIF orientation applied everywhere: scan, hashes, training,
+  evaluation and audit. Datasets imported before this change (format 1) must be re-imported.
 - Errors print `error: ...` and exit with code 1. Add `--debug` for a traceback.
+
+Real datasets used by this project, with their licenses, citations and download records, are
+listed in [DATASETS.md](DATASETS.md). Dataset files are never committed.
 
 Algorithm details and limitations: [EXPERIMENT_PROTOCOL.md](EXPERIMENT_PROTOCOL.md).
 
