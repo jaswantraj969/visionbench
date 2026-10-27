@@ -1,0 +1,7 @@
+# eurosat-v1 protocol model: majority baseline (predicts the train class prior; no images used).
+# Seed is set per run by scripts/run_benchmark.py (--seed); the baseline does not use it.
+dataset_id: ds-61112928e412
+split_id: sp-55320e11726c
+model: majority_baseline
+seed: 0
+device: cpu

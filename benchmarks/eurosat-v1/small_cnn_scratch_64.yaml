@@ -1,0 +1,30 @@
+# eurosat-v1 protocol model: small_cnn from scratch at 64 px (native resolution).
+# Seed is set per run by scripts/run_benchmark.py (--seed 0/1/2).
+dataset_id: ds-61112928e412
+split_id: sp-55320e11726c
+model: small_cnn
+weights: scratch
+finetune: full
+input_size: 64
+epochs: 25
+batch_size: 64
+optimizer: adamw
+lr: 1.0e-3
+weight_decay: 1.0e-4
+scheduler: cosine
+early_stopping:
+  enabled: true
+  monitor: val_loss
+  patience: 5
+  min_delta: 0.0
+class_weighted_loss: false
+seed: 0
+device: cuda
+amp: false
+num_workers: 0
+augmentation:
+  horizontal_flip: true
+  random_resized_crop: true
+  rrc_scale: [0.8, 1.0]
+  rrc_ratio: [0.75, 1.3333]
+allow_weight_fallback: false
