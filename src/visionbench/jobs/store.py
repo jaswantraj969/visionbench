@@ -26,7 +26,14 @@ from sqlalchemy import Boolean, Integer, String, Text, select, text
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from visionbench.core.errors import VisionBenchError
-from visionbench.tracking.store import _INSERTION_ORDER, Base, TrackingError, open_engine, utcnow
+from visionbench.tracking.store import (
+    _INSERTION_ORDER,
+    Base,
+    NotFoundError,
+    TrackingError,
+    open_engine,
+    utcnow,
+)
 
 JOB_KINDS = (
     "dataset_import",
@@ -44,7 +51,7 @@ class QueueFullError(VisionBenchError):
     pass
 
 
-class JobNotFoundError(TrackingError):
+class JobNotFoundError(NotFoundError):
     pass
 
 

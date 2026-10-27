@@ -60,6 +60,10 @@ class TrackingError(VisionBenchError):
     pass
 
 
+class NotFoundError(TrackingError):
+    pass
+
+
 def utcnow() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
@@ -325,7 +329,7 @@ class ExperimentStore:
     def _get(s: Session, exp_id: str) -> Experiment:
         exp = s.get(Experiment, exp_id)
         if exp is None:
-            raise TrackingError(f"experiment {exp_id} not found")
+            raise NotFoundError(f"experiment {exp_id} not found")
         return exp
 
     def get(self, exp_id: str) -> dict[str, Any]:
@@ -383,7 +387,7 @@ class ExperimentStore:
         with Session(self.engine) as s:
             row = s.get(Evaluation, eval_id)
             if row is None:
-                raise TrackingError(f"evaluation {eval_id} not found")
+                raise NotFoundError(f"evaluation {eval_id} not found")
             return _row(row)
 
     def evaluations(

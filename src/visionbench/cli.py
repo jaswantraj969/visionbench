@@ -397,6 +397,45 @@ def _cmd_worker(args: argparse.Namespace) -> int:
     return 0
 
 
+LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
+
+
+def _cmd_serve(args: argparse.Namespace) -> int:
+    """API + one worker subprocess. Refuses non-loopback hosts: the API has no auth."""
+    import os
+    import subprocess
+
+    import uvicorn
+
+    from visionbench.api.main import create_app
+
+    s = _settings()
+    host = args.host or s.api_host
+    port = args.port or s.api_port
+    if host not in LOOPBACK_HOSTS:
+        print(
+            f"error: refusing to bind to {host!r}: the API has no authentication; "
+            f"use one of {LOOPBACK_HOSTS}",
+            file=sys.stderr,
+        )
+        return 2
+    worker = None
+    if not args.no_worker:
+        env = os.environ | {"VISIONBENCH_DATA_ROOT": str(s.resolved_data_root)}
+        worker = subprocess.Popen([sys.executable, "-m", "visionbench.cli", "worker"], env=env)
+        print(f"worker started (pid {worker.pid})")
+    try:
+        uvicorn.run(create_app(s), host=host, port=port, log_level="info")
+    finally:
+        if worker is not None and worker.poll() is None:
+            worker.terminate()
+            try:
+                worker.wait(15)
+            except subprocess.TimeoutExpired:
+                worker.kill()
+    return 0
+
+
 def _cmd_compare(args: argparse.Namespace) -> int:
     from visionbench.evaluation.compare import compare_experiments
 
@@ -569,6 +608,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-jobs", type=int, help="exit after this many jobs (default: run forever)"
     )
     wrk.set_defaults(func=_cmd_worker)
+
+    srv = sub.add_parser(
+        "serve", parents=[common], help="run the API (localhost only) plus one worker"
+    )
+    srv.add_argument("--host", help="loopback host (default 127.0.0.1)")
+    srv.add_argument("--port", type=int, help="port (default 8000)")
+    srv.add_argument("--no-worker", action="store_true", help="API only (run a worker yourself)")
+    srv.set_defaults(func=_cmd_serve)
 
     cmp_ = sub.add_parser("compare", parents=[common], help="compare evaluated experiments")
     cmp_.add_argument("experiment_ids", nargs="+")
