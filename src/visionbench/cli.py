@@ -378,6 +378,25 @@ def _cmd_latency(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_worker(args: argparse.Namespace) -> int:
+    import logging
+
+    from visionbench.jobs.worker import WorkerConfig, run_worker
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    s = _settings()
+    wc = WorkerConfig.from_settings(s)
+    if args.poll_seconds is not None:
+        wc = WorkerConfig(
+            args.poll_seconds,
+            wc.heartbeat_seconds,
+            wc.stale_after_seconds,
+            wc.cancel_timeout_seconds,
+        )
+    run_worker(s, wc, max_jobs=args.max_jobs)
+    return 0
+
+
 def _cmd_compare(args: argparse.Namespace) -> int:
     from visionbench.evaluation.compare import compare_experiments
 
@@ -541,6 +560,15 @@ def build_parser() -> argparse.ArgumentParser:
     lat.add_argument("--warmup", type=int, default=10)
     lat.add_argument("--iterations", type=int, default=50)
     lat.set_defaults(func=_cmd_latency)
+
+    wrk = sub.add_parser(
+        "worker", parents=[common], help="run queued jobs one at a time (single worker)"
+    )
+    wrk.add_argument("--poll-seconds", type=float, help="queue poll interval")
+    wrk.add_argument(
+        "--max-jobs", type=int, help="exit after this many jobs (default: run forever)"
+    )
+    wrk.set_defaults(func=_cmd_worker)
 
     cmp_ = sub.add_parser("compare", parents=[common], help="compare evaluated experiments")
     cmp_.add_argument("experiment_ids", nargs="+")

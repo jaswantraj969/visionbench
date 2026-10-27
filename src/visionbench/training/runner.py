@@ -184,9 +184,10 @@ class _RunContext:
         run_dir: Path,
         run_log: logging.Logger,
         on_epoch: Callable[[dict[str, Any]], None] | None,
+        step_hook: loop.StepHook | None = None,
     ):
         self.store, self.exp_id, self.run_dir = store, exp_id, run_dir
-        self.log, self.on_epoch = run_log, on_epoch
+        self.log, self.on_epoch, self.step_hook = run_log, on_epoch, step_hook
 
     def record_epoch(self, record: dict[str, Any]) -> None:
         with open(self.run_dir / "history.jsonl", "a", encoding="utf-8", newline="\n") as f:
@@ -433,6 +434,7 @@ def _execute(
         max_steps=config.max_steps,
         amp=config.amp,
         on_epoch_end=on_epoch_end,
+        step_hook=ctx.step_hook,
     )
 
 
@@ -442,7 +444,11 @@ def run_training(
     *,
     on_start: Callable[[str, Path], None] | None = None,
     on_epoch: Callable[[dict[str, Any]], None] | None = None,
+    on_step: loop.StepHook | None = None,
 ) -> TrainingResult:
+    """Run one tracked training. ``on_step(global_step)`` runs after every optimizer step and
+    at each epoch end; raising :class:`loop.RunCancelled` there ends the run as ``cancelled``
+    (partial history and checkpoints kept)."""
     data_root = settings.resolved_data_root
     pre = preflight(config, settings.data_dir("datasets"))
     store = ExperimentStore(settings.data_dir("db") / DB_FILENAME)
@@ -455,6 +461,7 @@ def run_training(
         config={"config": config.model_dump(mode="json")},
         run_dir="experiments/{exp_id}",
     )
+    store.update(exp_id, runner_pid=os.getpid())  # lets crash recovery tell live runs apart
     run_dir = settings.data_dir("experiments") / exp_id
     (run_dir / "checkpoints").mkdir(parents=True)
     run_log = logging.getLogger(f"visionbench.training.run.{exp_id}")
@@ -462,7 +469,7 @@ def run_training(
     handler = logging.FileHandler(run_dir / "train.log", encoding="utf-8")
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     run_log.addHandler(handler)
-    ctx = _RunContext(store, exp_id, run_dir, run_log, on_epoch)
+    ctx = _RunContext(store, exp_id, run_dir, run_log, on_epoch, on_step)
 
     start = time.perf_counter()
     status, result = "failed", loop.FitResult()
@@ -491,6 +498,11 @@ def run_training(
         status = "cancelled"
         run_log.warning("cancelled by user (KeyboardInterrupt)")
         store.transition(exp_id, "cancelled", error="cancelled by user (KeyboardInterrupt)")
+        raise
+    except loop.RunCancelled:
+        status = "cancelled"
+        run_log.warning("cancelled by request (cooperative stop)")
+        store.transition(exp_id, "cancelled", error="cancelled by request")
         raise
     except BaseException as exc:
         run_log.error("failed: %s: %s", type(exc).__name__, exc)

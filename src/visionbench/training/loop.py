@@ -17,6 +17,12 @@ from torch.utils.data import DataLoader
 
 MONITOR_MODES = {"val_loss": "min", "val_balanced_accuracy": "max"}
 
+StepHook = Callable[[int], None]
+
+
+class RunCancelled(Exception):  # noqa: N818 - control flow, not an error condition
+    """Raised by a step hook to stop training cooperatively (e.g. a job cancel request)."""
+
 
 @dataclass
 class EarlyStopping:
@@ -96,11 +102,14 @@ def train_one_epoch(
     *,
     scaler: torch.amp.GradScaler | None = None,
     max_steps: int | None = None,
+    step_hook: StepHook | None = None,
+    step_offset: int = 0,
 ) -> tuple[float, int, int]:
     """One pass over ``loader`` (stops early after ``max_steps`` optimizer steps).
 
     Returns (mean training loss per sample, optimizer steps taken, samples seen). With class
-    weights in ``criterion`` the training loss is the class-weighted loss.
+    weights in ``criterion`` the training loss is the class-weighted loss. ``step_hook`` is
+    called with the global step after every optimizer step; it may raise :class:`RunCancelled`.
     """
     train_mode(model)  # re-applied every epoch: frozen BN layers stay in eval mode
     loss_sum, samples, steps = 0.0, 0, 0
@@ -121,6 +130,8 @@ def train_one_epoch(
         steps += 1
         samples += targets.shape[0]
         loss_sum += float(loss.detach()) * targets.shape[0]
+        if step_hook is not None:
+            step_hook(step_offset + steps)
     return (loss_sum / samples if samples else float("nan")), steps, samples
 
 
@@ -176,9 +187,14 @@ def fit(
     max_steps: int | None = None,
     amp: bool = False,
     on_epoch_end: EpochCallback | None = None,
+    step_hook: StepHook | None = None,
 ) -> FitResult:
     """Train for up to ``epochs``; after every epoch evaluate on VAL, update early stopping and
-    call ``on_epoch_end(record, is_best, model)`` (where checkpoints are written)."""
+    call ``on_epoch_end(record, is_best, model)`` (where checkpoints are written).
+
+    ``step_hook(global_step)`` runs after every optimizer step and once more after each epoch's
+    callbacks; raising :class:`RunCancelled` there stops training (the epoch already recorded
+    stays recorded)."""
     scaler = torch.amp.GradScaler(device.type) if amp else None
     result = FitResult()
     for epoch in range(1, epochs + 1):
@@ -186,7 +202,15 @@ def fit(
         lr = float(optimizer.param_groups[0]["lr"])
         remaining = None if max_steps is None else max_steps - result.total_steps
         train_loss, steps, samples = train_one_epoch(
-            model, train_loader, criterion, optimizer, device, scaler=scaler, max_steps=remaining
+            model,
+            train_loader,
+            criterion,
+            optimizer,
+            device,
+            scaler=scaler,
+            max_steps=remaining,
+            step_hook=step_hook,
+            step_offset=result.total_steps,
         )
         result.total_steps += steps
         if scheduler is not None:
@@ -205,6 +229,8 @@ def fit(
         result.history.append(record)
         if on_epoch_end is not None:
             on_epoch_end(record, is_best, model)
+        if step_hook is not None:
+            step_hook(result.total_steps)  # per-epoch cancellation check
         if max_steps is not None and result.total_steps >= max_steps:
             result.stopped_reason = "max_steps"
             break

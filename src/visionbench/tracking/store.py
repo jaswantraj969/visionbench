@@ -4,7 +4,8 @@ Schema is created with ``create_all``; a ``schema_version`` table records the ve
 upgrades so far are additive: new tables (``create_all``) and new nullable/defaulted columns
 (``ALTER TABLE ... ADD COLUMN`` from :data:`_COLUMN_UPGRADES`). History: v1 (M2) experiments,
 epoch_metrics, artifacts; v2 (M3) evaluations; v3 (M4 step 0) evaluations.forced/reason and
-latency_measurements. A stored version newer than this code is an error. Status transitions
+latency_measurements; v4 (M4) jobs table (``visionbench.jobs.store``) and
+experiments.runner_pid. A stored version newer than this code is an error. Status transitions
 are enforced: pending -> running -> completed | failed | cancelled (pending may also go to
 failed/cancelled).
 """
@@ -12,6 +13,7 @@ failed/cancelled).
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -26,17 +28,20 @@ from sqlalchemy import (
     String,
     Text,
     create_engine,
+    event,
     literal_column,
     select,
 )
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 from visionbench.core.errors import VisionBenchError
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 # Columns added to tables after they were first created (older DBs get ALTER TABLE ADD COLUMN).
 _COLUMN_UPGRADES: dict[str, dict[str, str]] = {
     "evaluations": {"forced": "BOOLEAN NOT NULL DEFAULT 0", "reason": "TEXT"},
+    "experiments": {"runner_pid": "INTEGER"},
 }
 DB_FILENAME = "visionbench.db"
 STATUSES = ("pending", "running", "completed", "failed", "cancelled")
@@ -91,6 +96,7 @@ class Experiment(Base):
     best_metric: Mapped[float | None] = mapped_column(Float)
     train_seconds: Mapped[float | None] = mapped_column(Float)
     run_dir: Mapped[str] = mapped_column(String(255))
+    runner_pid: Mapped[int | None] = mapped_column(Integer)  # process running the training
 
 
 class EpochMetric(Base):
@@ -168,7 +174,31 @@ def _row(obj: Base) -> dict[str, Any]:
 def open_engine(db_path: Path) -> Engine:
     """Engine for the tracking DB with the schema created/upgraded to :data:`SCHEMA_VERSION`."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    engine = create_engine(f"sqlite:///{db_path.as_posix()}")
+    # The API process and the worker write concurrently: WAL lets readers proceed during a
+    # write, and busy_timeout makes a writer wait for the lock instead of failing immediately.
+    engine = create_engine(f"sqlite:///{db_path.as_posix()}", connect_args={"timeout": 30})
+
+    @event.listens_for(engine, "connect")
+    def _sqlite_pragmas(dbapi_conn: Any, _record: Any) -> None:
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA busy_timeout=30000")
+        cur.close()
+
+    # journal_mode=WAL is persistent in the database file, so it is set once here (with a short
+    # retry) rather than on every connection: changing the journal mode needs a lock, and right
+    # after a writer process was killed Windows can report a transient "disk I/O error".
+    for attempt in range(5):
+        try:
+            with engine.connect() as conn:
+                conn.exec_driver_sql("PRAGMA journal_mode=WAL")
+            break
+        except OperationalError:
+            if attempt == 4:
+                raise
+            time.sleep(0.5)
+
+    import visionbench.jobs.store  # noqa: F401  (registers the jobs table on Base.metadata)
+
     with engine.begin() as conn:
         versions = (
             [r[0] for r in conn.exec_driver_sql("SELECT version FROM schema_version")]
@@ -261,6 +291,7 @@ class ExperimentStore:
             "best_epoch",
             "best_metric",
             "train_seconds",
+            "runner_pid",
         }
         if set(fields) - allowed:
             raise TrackingError(f"cannot update fields {sorted(set(fields) - allowed)}")
