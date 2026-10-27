@@ -44,7 +44,7 @@ _Last updated: 2026-10-27, end of M4 (pending supervisor review)._
   does not measure; those paths are exercised by the real-worker tests.
 - Real-worker tests: one job at a time, progress, cooperative cancel, hard kill of the worker
   + recovery (0 failures in 10 repeated runs after the WAL/ordering fixes), API health while
-  training (max 20.4 ms normal run / 24.3 ms GPU-hidden run).
+  training (max 12.7 ms normal run / 19.8 ms GPU-hidden run, final runs at `3c1955e`).
 - Every upload rejection rule has a test; image endpoint traversal cases return 404; a full
   API flow test asserts that no response body contains the absolute data root.
 - **Live demo with `visionbench serve`** (pipeline demo on synthetic data, not benchmark
