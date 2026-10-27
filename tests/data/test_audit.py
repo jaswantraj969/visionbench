@@ -169,7 +169,11 @@ def test_audit_writes_only_into_audits_dir(audited) -> None:
     for sheet in audit.sheets:
         with Image.open(sheet) as im:
             assert im.format == "PNG" and im.width >= 600
-    assert "consistency check" in (audit.path / "audit.md").read_text(encoding="utf-8")
+    md = (audit.path / "audit.md").read_text(encoding="utf-8")
+    assert "consistency check" in md and "different scales, indicative only" in md
+    field = audit.audit["within_dhash_threshold"]["phash_nearest_within_dhash_threshold_value"]
+    assert set(field) == {"count", "description"} and field["count"] >= 0
+    assert "phash_nearest_within_same_value" not in (audit.path / "audit.json").read_text()
     # re-running replaces the audit and still leaves the split alone
     audit_split(datasets, ds, result.split_id, seed=0)
     assert {p.name: p.read_bytes() for p in split_dir.iterdir()} == before

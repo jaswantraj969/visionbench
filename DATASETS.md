@@ -47,8 +47,12 @@ two notices:
 - `Copernicus Sentinel data [Year]` when the data is communicated or distributed;
 - `Contains modified Copernicus Sentinel data [Year]` when it has been adapted or modified.
 
-**Open point:** neither the Zenodo record nor the README states the acquisition year(s). The
-`[Year]` in the notice is left for the supervisor to fill from the paper.
+**Acquisition year: not stated by the dataset authors.** The authors' paper (arXiv:1709.00029v2,
+section III-A "Satellite Image Acquisition", p. 4) says only that the images were taken by
+Sentinel-2A and downloaded via Amazon S3. It also says: "we have extracted images recorded all
+over the year". It gives no year or acquisition period, and neither do the Zenodo record or the
+README. The notice is therefore used **without a year** (below). No year is inferred from the
+launch date or the submission date.
 
 ### Required citation
 
@@ -66,8 +70,9 @@ Both DOIs are the record's `isDescribedBy` relations on Zenodo.
 ### Attribution text to use
 
 > EuroSAT dataset © Patrick Helber, used under the MIT License
-> (<https://zenodo.org/records/7711810>). Contains modified Copernicus Sentinel data [Year].
-> Please cite Helber et al., IEEE JSTARS 2019 and IGARSS 2018.
+> (<https://zenodo.org/records/7711810>). Contains modified Copernicus Sentinel data
+> (acquisition year not stated by the dataset authors). Please cite Helber et al., IEEE JSTARS
+> 2019 and IGARSS 2018.
 
 ### What this project does and does not do with it (public portfolio)
 
@@ -101,3 +106,35 @@ The archive passed VisionBench's hardened ZIP validator (`visionbench.data.archi
 extracted with the same module into `var/downloads/extracted/EuroSAT_RGB/` and imported from
 there as dataset `ds-61112928e412` ("eurosat-rgb"). The fingerprint is
 `53a853ae82ee65dd0359263e5a76d81889bd46f770f6224e58965c42637b852f`.
+
+### Frozen benchmark split (decided by the supervisor, task VB-B1)
+
+| | |
+|---|---|
+| Dataset | `ds-61112928e412` (fingerprint `53a853ae82ee65dd0359263e5a76d81889bd46f770f6224e58965c42637b852f`) |
+| Split | **`sp-55320e11726c`**: dHash threshold 5, low-info std 3.0, popcount [8, 56], seed 0, fractions 0.7/0.15/0.15, label conflicts excluded (1 group, 2 files) |
+
+**Rationale.** The supervisor chose the default configuration (dHash 5, std 3.0, popcount
+[8, 56]) from the D1 calibration evidence. Among the configurations compared, it keeps the
+pairs that looked like true near-duplicates of the same scene (dHash 2–5) in one group. It
+excludes the single label-conflict pair and needs no oversized-group handling. Lower
+thresholds leave the d=4–5 near-duplicates ungrouped. Threshold 8 adds 14 label-conflict
+groups.
+
+**The other eight D1 calibration splits are not for benchmarking:** `sp-de74e9eb6716`,
+`sp-46faf9061e5d`, `sp-c62c555820af`, `sp-9212cd21f7c8`, `sp-6946a445b35d`, `sp-d3bbfdff4ffc`,
+`sp-328ba84bdf47` and `sp-dd53c5615dad`. They exist only as calibration evidence.
+
+### Known limitation: low-information images
+
+At the frozen settings, **3,357 of 27,000 images (12.4 %)** are low-information (std, degenerate
+or popcount test). They are concentrated in two classes:
+- **SeaLake: 2,327 of 3,000 (78 %)**;
+- **Forest: 1,019 of 3,000 (34 %)**;
+- Pasture has 8, AnnualCrop 3, and every other class 0.
+
+These images are nearly uniform water or canopy at 64 px. They are excluded from dHash
+grouping, and the D1 audit showed that both perceptual hashes are noise-driven on them.
+**Near-duplicates among them therefore cannot be assessed by hashing.** Only exact (SHA-256)
+and decoded-pixel duplicates are ruled out (0 across splits). Results for SeaLake and Forest
+should be read with this in mind.

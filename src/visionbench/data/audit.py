@@ -56,7 +56,7 @@ from visionbench.data.report import sample_relpaths
 from visionbench.data.split import group_size_stats
 from visionbench.data.store import dataset_dir, load_dataset, load_records
 
-AUDIT_FORMAT_VERSION = 1
+AUDIT_FORMAT_VERSION = 2  # 2 (B1): phash_nearest_within_dhash_threshold_value renamed
 SPLIT_ID_RE = re.compile(r"^sp-[0-9a-f]{12}$")
 HIST_MAX = 16
 NEAR_MISS_WIDTH = 3
@@ -427,7 +427,13 @@ def audit_split(
                 "query_low_info_neighbour_informative": int((within & q_low & ~n_low).sum()),
                 "query_low_info_neighbour_low_info": int((within & q_low & n_low).sum()),
             },
-            "phash_nearest_within_same_value": int((p_dist <= threshold).sum()),
+            # pHash distance compared with the numeric dHash threshold: different scales,
+            # so the count is indicative only
+            "phash_nearest_within_dhash_threshold_value": {
+                "count": int((p_dist <= threshold).sum()),
+                "description": "pHash distance compared with the numeric dHash threshold "
+                "(different scales; indicative only)",
+            },
         },
         "near_miss_band": {
             "range": [threshold + 1, threshold + NEAR_MISS_WIDTH],
@@ -598,8 +604,9 @@ def render_markdown(a: dict[str, Any]) -> str:
     for k, v in w["by_low_information"].items():
         out.append(f"  - {k.replace('_', ' ')}: {v}")
     out += [
-        f"- val/test images whose nearest pHash train distance is <= {w['threshold']}: "
-        f"{w['phash_nearest_within_same_value']}",
+        f"- val/test images whose nearest pHash train distance is <= {w['threshold']} "
+        "(pHash distance compared with the numeric dHash threshold; different scales, "
+        f"indicative only): {w['phash_nearest_within_dhash_threshold_value']['count']}",
         "",
         f"## Near-miss band (dHash {nm['range'][0]}..{nm['range'][1]}, informative images)",
         "",
