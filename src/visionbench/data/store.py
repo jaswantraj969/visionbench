@@ -6,11 +6,16 @@ Layout::
       dataset.json   metadata (name, id, fingerprint, classes, counts, validation summary)
       report.json    statistics, issues, duplicate groups, samples
       files.json     one record per accepted image (sha256, dHash, gray std, size, ...)
+      audits/<split_id>/   split audits (``visionbench.data.audit``; never inside splits/)
       raw/<class>/<file>   byte-for-byte copies of the accepted images
       splits/<split_id>/{manifest.json, split_info.json}
 
 Imports are staged in a temporary sibling directory and renamed into place only after
 validation succeeds; an existing dataset directory is never overwritten.
+
+Format history: 1 (M1); 2 (D1) dimensions, gray std and dHash are computed after EXIF
+orientation (``orientation: "exif_transposed"``, ``hash_version: 2`` in dataset.json and
+files.json). Snapshots in an older format are refused with a request to re-import.
 """
 
 from __future__ import annotations
@@ -29,11 +34,13 @@ from visionbench import __version__
 from visionbench.core.errors import DatasetExistsError, DatasetNotFoundError, DatasetValidationError
 from visionbench.core.jsonio import read_json, write_json
 from visionbench.data.grouping import build_groups
+from visionbench.data.hashing import HASH_VERSION
+from visionbench.data.imageio import ORIENTATION_POLICY
 from visionbench.data.records import FileRecord, compute_fingerprint
 from visionbench.data.report import build_report
 from visionbench.data.scan import ScanConfig, check_requirements, scan_source
 
-DATASET_FORMAT_VERSION = 1
+DATASET_FORMAT_VERSION = 2
 DATASET_ID_RE = re.compile(r"^ds-[0-9a-f]{12}$")
 MAX_NAME_LENGTH = 100
 
@@ -68,8 +75,36 @@ def dataset_dir(datasets_dir: Path, dataset_id: str) -> Path:
     return path
 
 
+class DatasetFormatError(DatasetValidationError):
+    pass
+
+
+def format_header() -> dict[str, Any]:
+    return {
+        "format_version": DATASET_FORMAT_VERSION,
+        "orientation": ORIENTATION_POLICY,
+        "hash_version": HASH_VERSION,
+    }
+
+
+def check_format(meta: dict[str, Any], dataset_id: str, what: str) -> None:
+    """Refuse snapshots written with another format / orientation policy / hash version."""
+    found = {k: meta.get(k) for k in format_header()}
+    if found != format_header():
+        raise DatasetFormatError(
+            f"dataset {dataset_id}: {what} has format_version={found['format_version']}, "
+            f"orientation={found['orientation']!r}, hash_version={found['hash_version']}; this "
+            f"version of VisionBench needs format_version={DATASET_FORMAT_VERSION}, "
+            f"orientation={ORIENTATION_POLICY!r}, hash_version={HASH_VERSION}. Re-import the "
+            "source folder (remove the old snapshot directory first, or import under a "
+            "different name)"
+        )
+
+
 def load_dataset(datasets_dir: Path, dataset_id: str) -> dict[str, Any]:
-    return read_json(dataset_dir(datasets_dir, dataset_id) / "dataset.json")
+    meta = read_json(dataset_dir(datasets_dir, dataset_id) / "dataset.json")
+    check_format(meta, dataset_id, "dataset.json")
+    return meta
 
 
 def load_report(datasets_dir: Path, dataset_id: str) -> dict[str, Any]:
@@ -78,6 +113,7 @@ def load_report(datasets_dir: Path, dataset_id: str) -> dict[str, Any]:
 
 def load_records(datasets_dir: Path, dataset_id: str) -> list[FileRecord]:
     data = read_json(dataset_dir(datasets_dir, dataset_id) / "files.json")
+    check_format(data, dataset_id, "files.json")
     return [FileRecord.from_dict(d) for d in data["records"]]
 
 
@@ -111,7 +147,7 @@ def verify_dataset(datasets_dir: Path, dataset_id: str, *, full: bool = False) -
     ``full=True`` additionally re-hashes every file (SHA-256).
     """
     root = dataset_dir(datasets_dir, dataset_id)
-    meta = read_json(root / "dataset.json")
+    meta = load_dataset(datasets_dir, dataset_id)
     records = load_records(datasets_dir, dataset_id)
     problems: list[tuple[str, str]] = []
     if compute_fingerprint(records) != meta["fingerprint"]:
@@ -186,7 +222,7 @@ def import_dataset(
         )
         counts = scan.class_counts()
         dataset = {
-            "format_version": DATASET_FORMAT_VERSION,
+            **format_header(),
             "id": dataset_id,
             "name": name,
             "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -210,7 +246,10 @@ def import_dataset(
                 "issue_counts": {k: v["count"] for k, v in report["issues"].items()},
             },
         }
-        write_json(staging / "files.json", {"records": [r.to_dict() for r in scan.records]})
+        write_json(
+            staging / "files.json",
+            {**format_header(), "records": [r.to_dict() for r in scan.records]},
+        )
         write_json(staging / "report.json", report)
         write_json(staging / "dataset.json", dataset)
         try:

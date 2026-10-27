@@ -20,6 +20,7 @@ from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 
 from visionbench.core.errors import VisionBenchError
+from visionbench.data.imageio import load_rgb
 
 ALLOWED_SPLITS = ("train", "val")
 
@@ -29,9 +30,8 @@ class SplitAccessError(VisionBenchError):
 
 
 def load_image(path: Path) -> Image.Image:
-    """Open a snapshot image as RGB (fully decoded, file handle closed)."""
-    with Image.open(path) as im:
-        return im.convert("RGB")
+    """Open a snapshot image as RGB (fully decoded, EXIF orientation applied, file closed)."""
+    return load_rgb(path)
 
 
 def select_entries(manifest: dict[str, Any], split: str) -> list[dict[str, Any]]:

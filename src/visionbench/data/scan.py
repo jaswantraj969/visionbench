@@ -21,10 +21,10 @@ from PIL import Image, ImageFile
 
 from visionbench.core.errors import DatasetValidationError
 from visionbench.data.hashing import dhash, format_hash
+from visionbench.data.imageio import PILLOW_FORMATS, decode_image
 from visionbench.data.records import FileRecord, Issue, IssueCategory, normalize_name
 
 SUPPORTED_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".bmp", ".webp"})
-PILLOW_FORMATS = ("JPEG", "PNG", "BMP", "WEBP")
 SYSTEM_FILE_NAMES = frozenset({".ds_store", "thumbs.db", "desktop.ini"})
 
 # Windows file attribute bits (st_file_attributes); absent on POSIX.
@@ -117,17 +117,18 @@ def _pillow_limits(max_pixels: int) -> Iterator[None]:
 def inspect_image(data: bytes, max_pixels: int) -> ImageInfo:
     """Fully decode ``data``; raise :class:`ImageRejected` if it is too large or corrupt.
 
-    ``verify()`` alone misses truncation, so the image is reopened and ``load()``-ed as well.
+    ``verify()`` alone misses truncation, so the image is then decoded completely as well,
+    through :func:`visionbench.data.imageio.decode_image`: dimensions, gray std and dHash are
+    those of the EXIF-transposed image (orientation policy ``exif_transposed``).
     """
     with _pillow_limits(max_pixels):
         try:
             with Image.open(io.BytesIO(data), formats=PILLOW_FORMATS) as im:
                 im.verify()
-            with Image.open(io.BytesIO(data), formats=PILLOW_FORMATS) as im:
-                im.load()
-                width, height = im.size
-                mode, fmt = im.mode, im.format or ""
-                gray = im.convert("L")
+            decoded = decode_image(data)
+            width, height = decoded.image.size
+            mode, fmt = decoded.mode, decoded.format
+            gray = decoded.image.convert("L")
         except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
             raise ImageRejected(IssueCategory.TOO_LARGE_PIXELS, str(exc)) from exc
         except Exception as exc:  # any decoder failure means the file is unusable

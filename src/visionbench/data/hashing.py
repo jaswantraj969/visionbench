@@ -2,6 +2,9 @@
 
 dHash: convert to grayscale, resize to 9x8 (width x height), and for each of the 8 rows emit
 8 bits ``pixel[x + 1] > pixel[x]``. Bits are packed row-major, most significant bit first.
+
+:data:`HASH_VERSION` identifies what the stored hashes were computed from: 1 (M1) the stored
+pixel orientation; 2 (D1) the EXIF-transposed image (``visionbench.data.imageio``).
 """
 
 from __future__ import annotations
@@ -9,6 +12,7 @@ from __future__ import annotations
 import numpy as np
 from PIL import Image
 
+HASH_VERSION = 2
 HASH_BITS = 64
 ALL_ONES = (1 << HASH_BITS) - 1
 

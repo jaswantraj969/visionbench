@@ -27,6 +27,10 @@ def test_import_writes_snapshot_metadata_and_report(messy, messy_config, tmp_pat
     assert root == datasets / result.dataset_id and result.dataset_id.startswith("ds-")
 
     meta = read_json(root / "dataset.json")
+    header = {"format_version": 2, "orientation": "exif_transposed", "hash_version": 2}
+    assert {k: meta[k] for k in header} == header
+    files = read_json(root / "files.json")
+    assert {k: files[k] for k in header} == header
     assert meta["name"] == "messy" and meta["classes"] == ["alpha", "beta", "gamma"]
     assert meta["class_counts"] == {"alpha": 8, "beta": 7, "gamma": 5}
     assert meta["source_path"] == str(messy.root.resolve())
