@@ -1,5 +1,5 @@
 # Lock file for the LOCAL CUDA development environment (not used by CI; CI installs CPU torch).
-# Generated with `pip freeze --exclude-editable` from the verified venv on 2026-10-27 (refreshed in M2: + SQLAlchemy; M3: + scikit-learn; M4: + python-multipart).
+# Generated with `pip freeze --exclude-editable` from the verified venv on 2026-10-27 (refreshed in M2: + SQLAlchemy; M3: + scikit-learn; M4: + python-multipart; M4.1: + psutil).
 # Python 3.11.15 (CPython, uv-managed), Windows 11 Home 10.0.26300, x86_64.
 # torch/torchvision are CUDA 13.0 builds. Intended install (not yet exercised from this file):
 #   python -m pip install -r requirements/lock-dev-cu130.txt --extra-index-url https://download.pytorch.org/whl/cu130
@@ -32,6 +32,7 @@ opentelemetry-api==1.45.1
 packaging==26.3
 pillow==12.3.0
 pluggy==1.7.0
+psutil==7.2.2
 pydantic==2.14.1
 pydantic-settings==2.16.1
 pydantic_core==2.50.1

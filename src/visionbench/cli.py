@@ -387,12 +387,7 @@ def _cmd_worker(args: argparse.Namespace) -> int:
     s = _settings()
     wc = WorkerConfig.from_settings(s)
     if args.poll_seconds is not None:
-        wc = WorkerConfig(
-            args.poll_seconds,
-            wc.heartbeat_seconds,
-            wc.stale_after_seconds,
-            wc.cancel_timeout_seconds,
-        )
+        wc = WorkerConfig(args.poll_seconds, wc.heartbeat_seconds, wc.cancel_timeout_seconds)
     run_worker(s, wc, max_jobs=args.max_jobs)
     return 0
 

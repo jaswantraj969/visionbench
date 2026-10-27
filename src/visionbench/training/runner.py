@@ -27,6 +27,7 @@ from visionbench.core.config import Settings
 from visionbench.core.env_info import collect_env_info
 from visionbench.core.errors import VisionBenchError
 from visionbench.core.jsonio import read_json, write_json
+from visionbench.core.process import own_identity
 from visionbench.core.seeding import set_seed
 from visionbench.data.store import dataset_dir, load_dataset, verify_dataset
 from visionbench.models.baseline import MajorityBaseline
@@ -460,8 +461,8 @@ def run_training(
         seed=config.seed,
         config={"config": config.model_dump(mode="json")},
         run_dir="experiments/{exp_id}",
+        runner=own_identity(),  # lets crash recovery tell live runs apart
     )
-    store.update(exp_id, runner_pid=os.getpid())  # lets crash recovery tell live runs apart
     run_dir = settings.data_dir("experiments") / exp_id
     (run_dir / "checkpoints").mkdir(parents=True)
     run_log = logging.getLogger(f"visionbench.training.run.{exp_id}")

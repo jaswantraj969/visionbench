@@ -1,35 +1,47 @@
 """Single-worker job runner: claim -> run in a child process -> heartbeat/cancel -> recover.
 
-- One worker per data root (lock file ``db/worker.lock``); it runs exactly one job at a time.
+- One worker per data root: an exclusive OS lock on ``db/worker.lock`` (``msvcrt.locking`` on
+  Windows, ``fcntl.flock`` on POSIX) is held for the worker's whole lifetime. The OS drops it when
+  the process dies, however it dies, so a crashed worker never blocks the next one. The file's
+  content (pid, creation time) is informational only and never decides anything.
+- Processes are identified by (pid, creation time) (:mod:`visionbench.core.process`); nothing is
+  ever terminated, or treated as alive, on the strength of a pid alone.
 - The oldest queued job is claimed atomically (:meth:`JobStore.claim`) and executed in a
   ``spawn`` child process, so a stuck job can be terminated without killing the worker.
-- The worker writes the heartbeat while the child runs. The child watches the worker's pid and
-  exits immediately if the worker disappears, so a hard-killed worker leaves no job running.
+- The worker writes the heartbeat while the child runs (informational: shown by the API). The
+  child watches the worker's identity and exits immediately if the worker disappears, so a
+  hard-killed worker leaves no job running.
 - Cancellation is cooperative (training checks the flag via its step hook). If the child has
   not stopped ``cancel_timeout`` seconds after the request, it is terminated and both the job
   and its experiment are marked cancelled with a note.
-- On startup, :func:`recover` fails jobs left ``running`` by a dead worker (pid not alive or
-  heartbeat stale) and experiments left ``pending``/``running`` with no live runner process,
-  with the error "interrupted: ...".
+- On startup, while holding the lock, :func:`recover` fails EVERY job left ``running`` (no other
+  worker can exist, so all of them are orphaned) and every ``pending``/``running`` experiment
+  whose recorded runner process is not alive, with the error "interrupted: ...".
 """
 
 from __future__ import annotations
 
-import contextlib
+import json
 import logging
 import multiprocessing
 import os
-import signal
 import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from visionbench.core.config import Settings
 from visionbench.core.errors import VisionBenchError
+from visionbench.core.process import (
+    own_identity,
+    process_create_time,
+    process_is,
+    terminate_process,
+    wait_gone,
+)
 from visionbench.core.redact import scrub_paths
 from visionbench.data.archive import cleanup_upload
 from visionbench.jobs.handlers import HANDLERS, JobContext
@@ -49,117 +61,94 @@ class WorkerError(VisionBenchError):
 class WorkerConfig:
     poll_seconds: float = 0.5
     heartbeat_seconds: float = 2.0
-    stale_after_seconds: float = 30.0
     cancel_timeout_seconds: float = 30.0
 
     @classmethod
     def from_settings(cls, s: Settings) -> WorkerConfig:
-        return cls(
-            s.worker_poll_seconds,
-            s.worker_heartbeat_seconds,
-            s.heartbeat_stale_seconds,
-            s.cancel_timeout_seconds,
-        )
+        return cls(s.worker_poll_seconds, s.worker_heartbeat_seconds, s.cancel_timeout_seconds)
 
 
-# --- process helpers (no third-party dependency; os.kill(pid, 0) is unsafe on Windows) ------
+# --- worker lock (OS-level) ----------------------------------------------------------------
+
+# msvcrt locks are mandatory byte-range locks: the locked byte sits far past the informational
+# content so other processes can still read the file. Locking beyond end-of-file is allowed.
+_LOCK_OFFSET = 1 << 30
+LOCK_FILENAME = "worker.lock"
 
 
-def pid_alive(pid: int | None) -> bool:
-    if not pid or pid <= 0:
-        return False
+def _try_lock(fd: int) -> bool:
     if os.name == "nt":
-        import ctypes
-        from ctypes import wintypes
+        import msvcrt
 
-        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        k32.OpenProcess.restype = wintypes.HANDLE
-        k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-        handle = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
-        if not handle:
-            return ctypes.get_last_error() == 5  # ERROR_ACCESS_DENIED: exists, not ours
+        os.lseek(fd, _LOCK_OFFSET, os.SEEK_SET)
         try:
-            code = wintypes.DWORD()
-            if not k32.GetExitCodeProcess(handle, ctypes.byref(code)):
-                return True
-            return code.value == 259  # STILL_ACTIVE
-        finally:
-            k32.CloseHandle(handle)
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return False
         return True
+    import fcntl
+
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return False
     return True
 
 
-def terminate_pid(pid: int) -> None:
+def _unlock(fd: int) -> None:
     if os.name == "nt":
-        import ctypes
-        from ctypes import wintypes
+        import msvcrt
 
-        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        k32.OpenProcess.restype = wintypes.HANDLE
-        k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-        handle = k32.OpenProcess(0x0001, False, pid)  # PROCESS_TERMINATE
-        if handle:
-            k32.TerminateProcess(handle, 1)
-            k32.CloseHandle(handle)
+        os.lseek(fd, _LOCK_OFFSET, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
     else:
-        with contextlib.suppress(ProcessLookupError):
-            os.kill(pid, signal.SIGKILL)
+        import fcntl
+
+        fcntl.flock(fd, fcntl.LOCK_UN)
 
 
-def _wait_dead(pid: int, timeout: float) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if not pid_alive(pid):
-            return True
-        time.sleep(0.1)
-    return not pid_alive(pid)
+def read_lock_info(settings: Settings) -> dict[str, Any] | None:
+    """The informational content of the lock file (who last held it), if readable."""
+    try:
+        text = (settings.data_dir("db") / LOCK_FILENAME).read_text(encoding="utf-8")
+        return json.loads(text) if text.strip() else None
+    except (OSError, ValueError):
+        return None
+
+
+@dataclass
+class WorkerLock:
+    path: Path
+    held: bool = True
 
 
 @contextmanager
-def worker_lock(settings: Settings) -> Iterator[None]:
-    """Exclusive per-data-root worker lock (stale locks of dead pids are taken over)."""
-    path = settings.data_dir("db") / "worker.lock"
-    for _ in range(2):
-        try:
-            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
-            try:
-                other = int(path.read_text(encoding="utf-8").strip() or 0)
-            except (OSError, ValueError):
-                other = 0
-            if other and other != os.getpid() and pid_alive(other):
-                raise WorkerError(
-                    f"another worker (pid {other}) is running on this data root"
-                ) from None
-            path.unlink(missing_ok=True)
-            continue
-        os.write(fd, str(os.getpid()).encode())
-        os.close(fd)
-        break
-    else:
-        raise WorkerError("could not acquire the worker lock")
+def worker_lock(settings: Settings) -> Iterator[WorkerLock]:
+    """Hold the exclusive per-data-root worker lock; fail fast if another process holds it."""
+    path = settings.data_dir("db") / LOCK_FILENAME
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
     try:
-        yield
-    finally:
+        if not _try_lock(fd):
+            info = read_lock_info(settings) or {}
+            raise WorkerError(
+                "another worker is running on this data root (the worker lock is held; "
+                f"the lock file names pid {info.get('pid')})"
+            )
+        pid, create_time = own_identity()
+        os.ftruncate(fd, 0)
+        os.lseek(fd, 0, os.SEEK_SET)
+        os.write(fd, json.dumps({"pid": pid, "create_time": create_time}).encode() + b"\n")
+        lock = WorkerLock(path)
         try:
-            if path.read_text(encoding="utf-8").strip() == str(os.getpid()):
-                path.unlink()
-        except OSError:
-            pass
+            yield lock
+        finally:
+            lock.held = False
+            _unlock(fd)
+    finally:
+        os.close(fd)
 
 
 # --- recovery ------------------------------------------------------------------------------
-
-
-def _age_seconds(stamp: str | None) -> float | None:
-    if not stamp:
-        return None
-    return (datetime.now(UTC) - datetime.fromisoformat(stamp)).total_seconds()
 
 
 def _close_experiment(settings: Settings, job: dict[str, Any], status: str, note: str) -> None:
@@ -178,28 +167,29 @@ def _cleanup_job_temp(settings: Settings, job: dict[str, Any]) -> None:
         cleanup_upload(settings, upload_id)
 
 
-def recover(settings: Settings, stale_after_seconds: float) -> dict[str, list[dict[str, Any]]]:
-    """Fail jobs and experiments orphaned by a dead worker/runner. Returns what was changed."""
+def recover(settings: Settings, lock: WorkerLock) -> dict[str, list[dict[str, Any]]]:
+    """Fail jobs and experiments orphaned by a dead worker/runner. Returns what was changed.
+
+    Must be called while holding the worker lock: then no other worker exists, so every
+    ``running`` job is orphaned, whatever its pids or heartbeat say.
+    """
+    if not lock.held:
+        raise WorkerError("recover() requires the worker lock")
     report: dict[str, list[dict[str, Any]]] = {"jobs": [], "experiments": []}
     db = settings.data_dir("db") / DB_FILENAME
     with JobStore(db) as js:
         for job in js.list(status="running", limit=100_000):
-            reasons = []
-            if not pid_alive(job["worker_pid"]):
-                reasons.append(f"worker pid {job['worker_pid']} not alive")
-            age = _age_seconds(job["heartbeat_at"])
-            if age is None or age > stale_after_seconds:
-                reasons.append(f"heartbeat stale ({age if age is None else round(age)} s)")
-            if not reasons:
-                continue
-            child = job["child_pid"]
-            if child and pid_alive(child):  # the child normally exits by itself; make sure
-                terminate_pid(child)
-                _wait_dead(child, 10.0)
-            note = "interrupted: " + "; ".join(reasons)
-            # Close the job's own experiment FIRST (its child, the training process, was made
-            # sure dead above; the runner pid is not consulted since it may have been reused),
-            # then fail the job: an observer that sees the job failed sees the experiment closed.
+            child, child_time = job["child_pid"], job["child_create_time"]
+            if child is None:
+                child_note = "no child process was started"
+            elif terminate_process(child, child_time):  # normally it already exited by itself
+                wait_gone(child, child_time, 10.0)
+                child_note = f"child process {child} was still running and was terminated"
+            else:
+                child_note = f"child process {child} not running (pid gone or reused)"
+            note = f"interrupted: worker {job['worker_pid']} is gone; {child_note}"
+            # Close the job's own experiment FIRST, then fail the job: an observer that sees the
+            # job failed sees the experiment closed.
             exp_id = (job.get("result") or {}).get("experiment_id")
             if exp_id:
                 with ExperimentStore(db) as es:
@@ -214,9 +204,9 @@ def recover(settings: Settings, stale_after_seconds: float) -> dict[str, list[di
         for exp in es.list():
             if exp["status"] not in ("pending", "running"):
                 continue
-            if pid_alive(exp.get("runner_pid")):
+            if process_is(exp.get("runner_pid"), exp.get("runner_create_time")):
                 continue  # e.g. a CLI `visionbench train` that is still running
-            note = f"interrupted: no live process for this run (runner pid {exp.get('runner_pid')})"
+            note = f"interrupted: runner process {exp.get('runner_pid')} not running"
             es.transition(exp["id"], "failed", error=note)
             report["experiments"].append({"experiment_id": exp["id"], "error": note})
     for item in report["jobs"]:
@@ -252,16 +242,16 @@ def execute_job(job_id: str, settings: Settings) -> str:
         return store.get(job_id)["status"]
 
 
-def _watch_parent(parent_pid: int) -> None:
+def _watch_parent(parent_pid: int, parent_create_time: float) -> None:
     while True:
         time.sleep(1.0)
-        if not pid_alive(parent_pid):
+        if not process_is(parent_pid, parent_create_time):
             os._exit(3)  # worker is gone: stop now, leave the job for recovery
 
 
-def _child_main(job_id: str, settings_payload: dict[str, Any], parent_pid: int) -> None:
+def _child_main(job_id: str, settings_payload: dict[str, Any], parent: tuple[int, float]) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    threading.Thread(target=_watch_parent, args=(parent_pid,), daemon=True).start()
+    threading.Thread(target=_watch_parent, args=parent, daemon=True).start()
     execute_job(job_id, Settings(_env_file=None, **settings_payload))
 
 
@@ -273,11 +263,11 @@ def run_job(store: JobStore, job: dict[str, Any], settings: Settings, wc: Worker
     ctx = multiprocessing.get_context("spawn")
     proc = ctx.Process(
         target=_child_main,
-        args=(job_id, settings.model_dump(mode="json"), os.getpid()),
+        args=(job_id, settings.model_dump(mode="json"), own_identity()),
         name=f"visionbench-{job_id}",
     )
     proc.start()
-    store.set_child_pid(job_id, proc.pid)
+    store.set_child(job_id, proc.pid, process_create_time(proc.pid))
     log.info("job %s (%s) started in child pid %s", job_id, job["kind"], proc.pid)
     cancel_seen: float | None = None
     try:
@@ -293,6 +283,8 @@ def run_job(store: JobStore, job: dict[str, Any], settings: Settings, wc: Worker
                 cancel_seen is not None
                 and time.monotonic() - cancel_seen > wc.cancel_timeout_seconds
             ):
+                # proc holds the child's process handle (Windows) / it is our unreaped child
+                # (POSIX), so this cannot hit a reused pid.
                 proc.terminate()
                 proc.join(15)
                 note = (
@@ -333,13 +325,14 @@ def run_worker(
     """Run jobs one at a time until ``stop`` is set (or ``max_jobs`` have run)."""
     wc = wc or WorkerConfig.from_settings(settings)
     stop = stop or threading.Event()
-    with worker_lock(settings):
+    with worker_lock(settings) as lock:
         log.info("worker pid %s started on data root %s", os.getpid(), settings.resolved_data_root)
-        recover(settings, wc.stale_after_seconds)
+        recover(settings, lock)
+        identity = own_identity()
         done = 0
         with JobStore(settings.data_dir("db") / DB_FILENAME) as store:
             while not stop.is_set():
-                job = store.claim(os.getpid())
+                job = store.claim(*identity)
                 if job is None:
                     stop.wait(wc.poll_seconds)
                     continue

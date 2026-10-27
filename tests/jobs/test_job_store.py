@@ -1,31 +1,19 @@
 """Job store and worker bookkeeping (no worker process)."""
 
-import os
-import subprocess
-import sys
 import threading
 from pathlib import Path
 
 import pytest
 
-from visionbench.core.config import Settings
-from visionbench.jobs import worker as worker_mod
 from visionbench.jobs.store import JobStore, QueueFullError
-from visionbench.jobs.worker import WorkerError, execute_job, pid_alive, recover, worker_lock
-from visionbench.tracking.store import DB_FILENAME, ExperimentStore, TrackingError
+from visionbench.jobs.worker import execute_job
+from visionbench.tracking.store import DB_FILENAME, TrackingError
 
 PARAMS = {"dataset_id": "ds-000000000000"}
 
 
 def _store(tmp_path: Path) -> JobStore:
     return JobStore(tmp_path / DB_FILENAME)
-
-
-def _dead_pid() -> int:
-    proc = subprocess.Popen([sys.executable, "-c", "pass"])
-    proc.wait()
-    assert not pid_alive(proc.pid)
-    return proc.pid
 
 
 def test_lifecycle_and_transitions(tmp_path: Path) -> None:
@@ -137,76 +125,6 @@ def test_concurrent_enqueue_and_worker_updates(tmp_path: Path) -> None:
         assert s.count("queued") == 60 and s.get(running)["progress"] == {"step": 119}
 
 
-def _settings(tmp_path: Path) -> Settings:
-    return Settings(_env_file=None, data_root=tmp_path / "var")
-
-
-def test_recover_stale_and_dead_jobs(tmp_path: Path, monkeypatch) -> None:
-    settings = _settings(tmp_path)
-    db = settings.data_dir("db") / DB_FILENAME
-    with JobStore(db) as s:
-        dead = s.enqueue("dataset_verify", PARAMS, max_queued=10)
-        stale = s.enqueue("dataset_verify", PARAMS, max_queued=10)
-        healthy = s.enqueue("dataset_verify", PARAMS, max_queued=10)
-        s.claim(_dead_pid())  # worker pid that no longer exists
-        s.claim(os.getpid())
-        s.claim(os.getpid())
-        s._update(stale, heartbeat_at="2000-01-01T00:00:00+00:00")
-    report = recover(settings, stale_after_seconds=30)
-    with JobStore(db) as s:
-        assert s.get(dead)["status"] == "failed" and "not alive" in s.get(dead)["error"]
-        assert s.get(stale)["status"] == "failed" and "heartbeat stale" in s.get(stale)["error"]
-        assert s.get(healthy)["status"] == "running"
-        assert all(s.get(j)["error"].startswith("interrupted") for j in (dead, stale))
-    assert {j["job_id"] for j in report["jobs"]} == {dead, stale}
-
-
-def test_recover_orphaned_experiments(tmp_path: Path) -> None:
-    settings = _settings(tmp_path)
-    db = settings.data_dir("db") / DB_FILENAME
-    with ExperimentStore(db) as es:
-        ids = []
-        for pid in (_dead_pid(), os.getpid(), None):
-            e = es.create(
-                dataset_id="ds",
-                split_id="sp",
-                dataset_fingerprint="f",
-                model="m",
-                seed=0,
-                config={},
-                run_dir="experiments/{exp_id}",
-            )
-            if pid:
-                es.update(e, runner_pid=pid)
-            ids.append(e)
-        es.transition(ids[0], "running")
-        es.transition(ids[1], "running")  # alive runner (this process): left alone
-    report = recover(settings, stale_after_seconds=30)
-    with ExperimentStore(db) as es:
-        assert es.get(ids[0])["status"] == "failed"
-        assert es.get(ids[0])["error"].startswith("interrupted")
-        assert es.get(ids[1])["status"] == "running"
-        assert es.get(ids[2])["status"] == "failed"  # pending with no runner process
-    assert {e["experiment_id"] for e in report["experiments"]} == {ids[0], ids[2]}
-
-
-def test_worker_lock(tmp_path: Path) -> None:
-    settings = _settings(tmp_path)
-    lock = settings.data_dir("db") / "worker.lock"
-    sleeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
-    try:
-        lock.write_text(str(sleeper.pid), encoding="utf-8")
-        with pytest.raises(WorkerError, match="another worker"), worker_lock(settings):
-            pass
-    finally:
-        sleeper.kill()
-        sleeper.wait()
-    lock.write_text(str(_dead_pid()), encoding="utf-8")  # stale lock is taken over
-    with worker_lock(settings):
-        assert lock.read_text(encoding="utf-8") == str(os.getpid())
-    assert not lock.exists()
-
-
 def test_execute_job_inline_success_and_failure(train_env) -> None:
     settings = train_env.settings
     db = settings.data_dir("db") / DB_FILENAME
@@ -225,9 +143,3 @@ def test_execute_job_inline_success_and_failure(train_env) -> None:
         assert s.get(invalid)["error"].startswith("ValidationError")
         root = str(settings.resolved_data_root)
         assert all(root.lower() not in (s.get(j)["error"] or "").lower() for j in (bad, invalid))
-
-
-def test_pid_alive_self_and_dead() -> None:
-    assert pid_alive(os.getpid())
-    assert not pid_alive(_dead_pid()) and not pid_alive(None) and not pid_alive(0)
-    assert worker_mod.terminate_pid is not None

@@ -46,7 +46,6 @@ class Settings(BaseSettings):
     max_queued_jobs: int = Field(default=10, ge=1)
     worker_poll_seconds: float = Field(default=0.5, gt=0)
     worker_heartbeat_seconds: float = Field(default=2.0, gt=0)
-    heartbeat_stale_seconds: float = Field(default=30.0, gt=0)
     cancel_timeout_seconds: float = Field(default=30.0, gt=0)
     # Server-side path imports are disabled unless import_root is set.
     import_root: Path | None = None

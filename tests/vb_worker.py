@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import subprocess
 import sys
@@ -16,22 +17,33 @@ from visionbench.tracking.store import DB_FILENAME
 
 
 class WorkerProcess:
-    def __init__(self, settings: Settings, log_path: Path, **env_overrides: str) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        log_path: Path,
+        *,
+        max_jobs: int | None = None,
+        **env_overrides: str,
+    ) -> None:
         env = (
             os.environ
             | {
                 "VISIONBENCH_DATA_ROOT": str(settings.resolved_data_root),
                 "VISIONBENCH_WORKER_HEARTBEAT_SECONDS": "0.5",
-                "VISIONBENCH_HEARTBEAT_STALE_SECONDS": "5",
                 "VISIONBENCH_CANCEL_TIMEOUT_SECONDS": "30",
                 "PYTHONUNBUFFERED": "1",
             }
             | env_overrides
         )
+        self.env = env
         self.log_path = log_path
         self._log = open(log_path, "ab")  # noqa: SIM115 - closed in stop()
+        args = [sys.executable, "-m", "visionbench.cli", "worker", "--poll-seconds", "0.2"]
+        if max_jobs is not None:  # exits normally after that many jobs (coverage data is saved)
+            args += ["--max-jobs", str(max_jobs)]
+        self.max_jobs = max_jobs
         self.proc = subprocess.Popen(
-            [sys.executable, "-m", "visionbench.cli", "worker", "--poll-seconds", "0.2"],
+            args,
             env=env,
             stdout=self._log,
             stderr=subprocess.STDOUT,
@@ -47,6 +59,9 @@ class WorkerProcess:
         self.proc.wait(30)
 
     def stop(self) -> None:
+        if self.proc.poll() is None and self.max_jobs is not None:
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                self.proc.wait(60)  # let it finish its last job and exit by itself
         if self.proc.poll() is None:
             self.proc.kill()
             self.proc.wait(30)

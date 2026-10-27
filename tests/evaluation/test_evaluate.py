@@ -335,7 +335,7 @@ def test_schema_upgrade_from_v1(tmp_path: Path) -> None:
     with ExperimentStore(db) as s:
         assert s.evaluations() == []
     con = sqlite3.connect(db)
-    assert con.execute("SELECT version FROM schema_version").fetchall() == [(4,)]
+    assert con.execute("SELECT version FROM schema_version").fetchall() == [(5,)]
     con.execute("UPDATE schema_version SET version = 99")
     con.commit()
     con.close()
@@ -422,7 +422,7 @@ def test_schema_upgrade_from_v2_adds_forced_columns(tmp_path: Path) -> None:
         (row,) = s.evaluations()
     assert row["id"] == "ev-old" and row["forced"] is False and row["reason"] is None
     con = sqlite3.connect(db)
-    assert con.execute("SELECT version FROM schema_version").fetchall() == [(4,)]
+    assert con.execute("SELECT version FROM schema_version").fetchall() == [(5,)]
     con.close()
 
 

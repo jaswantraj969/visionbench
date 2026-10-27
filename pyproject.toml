@@ -19,6 +19,7 @@ dependencies = [
     "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.30,<1",
     "python-multipart>=0.0.9,<1",
+    "psutil>=5.9,<8",
     "pydantic>=2.7,<3",
     "pydantic-settings>=2.3,<3",
     "pyyaml>=6.0,<7",
@@ -54,7 +55,15 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+markers = ["max_jobs(n): the test's worker exits by itself after n jobs (coverage data is saved)"]
 
 [tool.coverage.run]
 source = ["visionbench"]
 branch = true
+# Measure the `visionbench worker` subprocesses and their spawn children too: coverage starts
+# itself in every Python subprocess (patch=subprocess) and in multiprocessing children, and saves
+# data before os._exit (the child watchdog). Data files are combined after the run. Processes
+# that are hard-killed (by design in some tests) write no data.
+parallel = true
+patch = ["subprocess", "_exit"]
+concurrency = ["thread", "multiprocessing"]

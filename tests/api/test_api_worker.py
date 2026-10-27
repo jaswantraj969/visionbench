@@ -10,9 +10,10 @@ JOB_TIMEOUT = 180  # generous: each job spawns a fresh Python + torch import
 
 
 @pytest.fixture
-def api_worker(train_env, tmp_path):
+def api_worker(train_env, tmp_path, request):
     api = RecordingClient(train_env.settings)
-    w = WorkerProcess(train_env.settings, tmp_path / "worker.log")
+    max_jobs = request.node.get_closest_marker("max_jobs").args[0]  # then it exits by itself
+    w = WorkerProcess(train_env.settings, tmp_path / "worker.log", max_jobs=max_jobs)
     yield api, w
     w.stop()
 
@@ -35,6 +36,7 @@ def _wait_done(api, job_id: str, timeout: float = JOB_TIMEOUT) -> dict:
     )
 
 
+@pytest.mark.max_jobs(2)
 def test_worker_runs_api_jobs_with_progress_and_health_stays_fast(
     train_env, api_worker, report_line
 ) -> None:
@@ -69,6 +71,7 @@ def test_worker_runs_api_jobs_with_progress_and_health_stays_fast(
     assert api.absolute_root_leaks() == []
 
 
+@pytest.mark.max_jobs(1)
 def test_cancel_via_api_keeps_partial_history(train_env, api_worker) -> None:
     api, _ = api_worker
     job = _train(api, train_env, epochs=500)

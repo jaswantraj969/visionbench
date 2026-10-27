@@ -1,4 +1,5 @@
-"""Job store: the ``jobs`` table (tracking DB, schema v4) and its state machine.
+"""Job store: the ``jobs`` table (tracking DB, schema v4; v5 adds process creation times) and
+its state machine.
 
 Lifecycle: queued -> running -> completed | failed | cancelled; a queued job can also be
 cancelled directly. The API process enqueues and reads; the single worker claims, heartbeats,
@@ -22,7 +23,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Boolean, Integer, String, Text, select, text
+from sqlalchemy import Boolean, Float, Integer, String, Text, select, text
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from visionbench.core.errors import VisionBenchError
@@ -65,8 +66,11 @@ class Job(Base):
     error: Mapped[str | None] = mapped_column(Text)  # "<Type>: <message>", no absolute paths
     progress_json: Mapped[str | None] = mapped_column(Text)
     cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Processes are identified by (pid, creation time); see visionbench.core.process.
     worker_pid: Mapped[int | None] = mapped_column(Integer)
+    worker_create_time: Mapped[float | None] = mapped_column(Float)
     child_pid: Mapped[int | None] = mapped_column(Integer)
+    child_create_time: Mapped[float | None] = mapped_column(Float)
     heartbeat_at: Mapped[str | None] = mapped_column(String(32))
     created_at: Mapped[str] = mapped_column(String(32))
     started_at: Mapped[str | None] = mapped_column(String(32))
@@ -84,7 +88,9 @@ def _public(job: Job) -> dict[str, Any]:
         "progress": json.loads(job.progress_json) if job.progress_json else None,
         "cancel_requested": bool(job.cancel_requested),
         "worker_pid": job.worker_pid,
+        "worker_create_time": job.worker_create_time,
         "child_pid": job.child_pid,
+        "child_create_time": job.child_create_time,
         "heartbeat_at": job.heartbeat_at,
         "created_at": job.created_at,
         "started_at": job.started_at,
@@ -148,19 +154,21 @@ class JobStore:
 
     # --- worker side ----------------------------------------------------------------------
 
-    def claim(self, worker_pid: int) -> dict[str, Any] | None:
+    def claim(
+        self, worker_pid: int, worker_create_time: float | None = None
+    ) -> dict[str, Any] | None:
         """Atomically move the oldest queued job to running; ``None`` if the queue is empty."""
         now = utcnow()
         with self.engine.begin() as conn:
             row = conn.execute(
                 text(
                     "UPDATE jobs SET status = 'running', started_at = :now, heartbeat_at = :now,"
-                    " worker_pid = :pid"
+                    " worker_pid = :pid, worker_create_time = :ctime"
                     " WHERE id = (SELECT id FROM jobs WHERE status = 'queued'"
                     "             ORDER BY created_at, rowid LIMIT 1)"
                     " AND status = 'queued' RETURNING id"
                 ),
-                {"now": now, "pid": worker_pid},
+                {"now": now, "pid": worker_pid, "ctime": worker_create_time},
             ).first()
         return self.get(row[0]) if row else None
 
@@ -170,8 +178,8 @@ class JobStore:
             for k, v in fields.items():
                 setattr(job, k, v)
 
-    def set_child_pid(self, job_id: str, pid: int) -> None:
-        self._update(job_id, child_pid=pid)
+    def set_child(self, job_id: str, pid: int, create_time: float | None) -> None:
+        self._update(job_id, child_pid=pid, child_create_time=create_time)
 
     def heartbeat(self, job_id: str) -> None:
         self._update(job_id, heartbeat_at=utcnow())

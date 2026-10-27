@@ -6,6 +6,7 @@ Training reports progress and checks for cancellation through the training step 
 
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -24,6 +25,9 @@ from visionbench.training.loop import RunCancelled
 from visionbench.training.runner import run_training
 
 CANCEL_POLL_SECONDS = 0.5  # how often a training step may hit the DB for cancel/progress
+# Test-only hook: makes a job ignore cooperative cancel so that tests can exercise the worker's
+# terminate-after-timeout path for TRAINING jobs. Never set it outside tests.
+TEST_IGNORE_CANCEL_ENV = "VISIONBENCH_TEST_IGNORE_COOPERATIVE_CANCEL"
 
 
 @dataclass
@@ -39,6 +43,8 @@ class JobContext:
         self.store.update_progress(self.job_id, self.progress_state)
 
     def check_cancel(self) -> None:
+        if os.environ.get(TEST_IGNORE_CANCEL_ENV) == "1":
+            return
         if self.store.is_cancel_requested(self.job_id):
             raise RunCancelled(f"job {self.job_id} cancel requested")
 
