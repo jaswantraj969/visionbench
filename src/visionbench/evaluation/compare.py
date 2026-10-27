@@ -30,8 +30,12 @@ from visionbench.evaluation.metrics import DEFAULT_BOOTSTRAP, paired_bootstrap_d
 from visionbench.models.pretrained import file_sha256
 from visionbench.tracking.store import DB_FILENAME, ExperimentStore
 
-REPORT_FORMAT_VERSION = 1
+REPORT_FORMAT_VERSION = 2
 SELECTED_CHECKPOINTS = ("best", "baseline")
+VAL_SELECTION_BIAS_NOTE = (
+    "validation metrics are selection-biased: the same validation data chose each model's "
+    "checkpoint (early stopping / best epoch), so they overestimate performance on new data"
+)
 
 
 def _read_predictions(path: Path) -> tuple[list[str], list[str], list[str]]:
@@ -43,17 +47,76 @@ def _read_predictions(path: Path) -> tuple[list[str], list[str], list[str]]:
     )
 
 
-def _entry(store: ExperimentStore, data_root: Path, exp_id: str, split: str) -> dict[str, Any]:
+def _pinned_evaluations(
+    store: ExperimentStore, eval_ids: list[str], exp_ids: list[str], split: str
+) -> dict[str, dict[str, Any]]:
+    """Validate ``--eval-ids``: each belongs to a compared experiment, is on ``split``, uses the
+    val-selected checkpoint, and at most one is given per experiment."""
+    pinned: dict[str, dict[str, Any]] = {}
+    for eid in eval_ids:
+        ev = store.get_evaluation(eid)
+        if ev["experiment_id"] not in exp_ids:
+            raise EvaluationError(f"evaluation {eid} does not belong to a compared experiment")
+        if ev["split"] != split:
+            raise EvaluationError(f"evaluation {eid} is on split {ev['split']!r}, not {split!r}")
+        if ev["checkpoint"] not in SELECTED_CHECKPOINTS:
+            raise EvaluationError(
+                f"evaluation {eid} uses checkpoint {ev['checkpoint']!r}, not the val-selected one"
+            )
+        if ev["experiment_id"] in pinned:
+            raise EvaluationError(f"more than one evaluation pinned for {ev['experiment_id']}")
+        pinned[ev["experiment_id"]] = ev
+    return pinned
+
+
+def _latency(store: ExperimentStore, exp: dict[str, Any], device: str | None) -> dict[str, Any]:
+    """Latest latency measurement of ``exp`` on ``device`` (never mixes devices)."""
+    if exp["model"] == "majority_baseline":
+        return {"applicable": False, "reason": "majority_baseline has no forward pass"}
+    if device is None:
+        return {"applicable": False, "reason": "no --latency-device given"}
+    rows = store.latencies(exp["id"], device=device)
+    if not rows:
+        return {
+            "applicable": False,
+            "reason": f"no latency measured on {device}; run `visionbench latency {exp['id']} "
+            f"--device {device}`",
+        }
+    row = rows[-1]
+    return {
+        "applicable": True,
+        "latency_id": row["id"],
+        "device": row["device"],
+        "device_name": row["device_name"],
+        "torch_threads": row["torch_threads"],
+        "input_size": row["input_size"],
+        "batch_sizes": json.loads(row["results_json"]),
+    }
+
+
+def _entry(
+    store: ExperimentStore,
+    data_root: Path,
+    exp_id: str,
+    split: str,
+    pinned: dict[str, Any] | None,
+    latency_device: str | None,
+) -> dict[str, Any]:
     exp = store.get(exp_id)
-    evals = [
-        e for e in store.evaluations(exp_id, split=split) if e["checkpoint"] in SELECTED_CHECKPOINTS
-    ]
-    if not evals:
-        raise EvaluationError(
-            f"experiment {exp_id} has no '{split}' evaluation of its val-selected checkpoint; "
-            f"run `visionbench evaluate {exp_id} --split {split}` first"
-        )
-    ev = evals[-1]
+    if pinned is not None:
+        ev = pinned
+    else:
+        evals = [
+            e
+            for e in store.evaluations(exp_id, split=split)
+            if e["checkpoint"] in SELECTED_CHECKPOINTS
+        ]
+        if not evals:
+            raise EvaluationError(
+                f"experiment {exp_id} has no '{split}' evaluation of its val-selected checkpoint; "
+                f"run `visionbench evaluate {exp_id} --split {split}` first"
+            )
+        ev = evals[-1]
     metrics_path = data_root / ev["metrics_path"]
     doc = read_json(metrics_path)
     pred_path = metrics_path.parent / "predictions.csv"
@@ -64,11 +127,15 @@ def _entry(store: ExperimentStore, data_root: Path, exp_id: str, split: str) -> 
     eff = read_json(metrics_path.parent / "efficiency.json")
     epochs = store.epochs(exp_id)
     best = next((e for e in epochs if e["epoch"] == exp["best_epoch"]), None)
+    test_evals = store.evaluations(exp_id, split="test")
     return {
         "experiment": exp,
         "evaluation": ev,
+        "pinned": pinned is not None,
         "metrics_doc": doc,
         "efficiency": eff,
+        "latency": _latency(store, exp, latency_device),
+        "forced_test_reasons": [e["reason"] for e in test_evals if e.get("forced")],
         "config": run_config["config"],
         "resolved": run_config["resolved"],
         "relpaths": relpaths,
@@ -141,13 +208,22 @@ def _confounds(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     weighted = values(trained, lambda e: e["config"]["class_weighted_loss"])
     if len(set(weighted.values())) > 1:
         flag("class_weighting_differs", "some runs used class-weighted loss", weighted)
+    # Guard only: latency rows are selected for a single --latency-device, so this cannot fire
+    # unless that invariant is broken.
     devices = {
-        e["experiment"]["id"]: e["efficiency"]["latency"].get("device")
-        for e in trained
-        if e["efficiency"]["latency"].get("applicable")
+        e["experiment"]["id"]: e["latency"]["device"] for e in trained if e["latency"]["applicable"]
     }
     if len(set(devices.values())) > 1:
         flag("latency_devices_differ", "latency was measured on different devices", devices)
+    forced = {
+        e["experiment"]["id"]: e["forced_test_reasons"] for e in entries if e["forced_test_reasons"]
+    }
+    if forced:
+        flag(
+            "forced_test_reevaluation",
+            "repeated TEST evaluations were forced; reasons recorded",
+            forced,
+        )
     test_uses = values(entries, lambda e: e["test_evaluations"])
     if any(n > 1 for n in test_uses.values()):
         flag(
@@ -167,11 +243,19 @@ def compare_experiments(
     resamples: int = DEFAULT_BOOTSTRAP,
     seed: int = 0,
     note: str | None = None,
+    eval_ids: list[str] | None = None,
+    latency_device: str | None = None,
+    write: bool = True,
 ) -> dict[str, Any]:
+    """Build (and by default write) a comparison report. ``eval_ids`` pins evaluations;
+    experiments without a pinned id use their latest val-selected evaluation on ``split``.
+    Latency is reported only for ``latency_device`` (cpu|cuda), never mixed."""
     if split not in EVAL_SPLITS:
         raise EvaluationError(f"split must be one of {EVAL_SPLITS}")
     if len(exp_ids) < 2 or len(set(exp_ids)) != len(exp_ids):
         raise EvaluationError("compare needs at least two distinct experiment ids")
+    if latency_device not in (None, "cpu", "cuda"):
+        raise EvaluationError("latency_device must be 'cpu' or 'cuda'")
     data_root = settings.resolved_data_root
     with ExperimentStore(settings.data_dir("db") / DB_FILENAME) as store:
         exps = [store.get(x) for x in exp_ids]
@@ -182,7 +266,10 @@ def compare_experiments(
                 "refusing to compare experiments on different data: "
                 f"dataset fingerprints {sorted(fps)}, split_ids {sorted(splits)}"
             )
-        entries = [_entry(store, data_root, x, split) for x in exp_ids]
+        pinned = _pinned_evaluations(store, eval_ids or [], exp_ids, split)
+        entries = [
+            _entry(store, data_root, x, split, pinned.get(x), latency_device) for x in exp_ids
+        ]
 
     base = entries[0]
     for e in entries[1:]:
@@ -204,7 +291,7 @@ def compare_experiments(
     for e in entries:
         exp, m, eff = e["experiment"], e["metrics_doc"]["metrics"], e["efficiency"]
         ci = e["metrics_doc"]["bootstrap"]["metrics"]
-        lat = eff["latency"]
+        lat = e["latency"]
         row = {
             "experiment_id": exp["id"],
             "model": exp["model"],
@@ -212,11 +299,14 @@ def compare_experiments(
             "input_size": e["resolved"].get("input_size"),
             "params_total": eff["params"]["total"],
             "checkpoint_size_bytes": eff["checkpoint_size_bytes"],
+            "latency": lat,
             "latency_bs1_median_ms": (
-                lat["batch_sizes"]["1"]["median_ms"] if lat.get("applicable") else None
+                lat["batch_sizes"]["1"]["median_ms"]
+                if lat["applicable"] and "1" in lat["batch_sizes"]
+                else None
             ),
-            "latency_device": lat.get("device") if lat.get("applicable") else None,
-            "latency_note": None if lat.get("applicable") else lat.get("reason"),
+            "latency_device": lat.get("device") if lat["applicable"] else None,
+            "latency_note": None if lat["applicable"] else lat["reason"],
             "train_seconds": exp["train_seconds"],
             "best_epoch": exp["best_epoch"],
             "selection_monitor": e["config"]["early_stopping"]["monitor"],
@@ -224,7 +314,9 @@ def compare_experiments(
             "val_balanced_accuracy_at_selected_epoch": e["val_bal_acc_at_selected_epoch"],
             "checkpoint": e["evaluation"]["checkpoint"],
             "eval_id": e["evaluation"]["id"],
+            "eval_pinned": e["pinned"],
             "test_evaluations": e["test_evaluations"],
+            "forced_test_reasons": e["forced_test_reasons"],
             "bootstrap": {k: e["metrics_doc"]["bootstrap"][k] for k in ("resamples", "seed")},
             split: {
                 "accuracy": m["accuracy"],
@@ -260,6 +352,8 @@ def compare_experiments(
         "n_samples": len(y_true),
         "class_names": class_names,
         "reference_experiment": reference,
+        "latency_device": latency_device,
+        "selection_bias_note": VAL_SELECTION_BIAS_NOTE if split == "val" else None,
         "paired_bootstrap": {
             "resamples": resamples,
             "seed": seed,
@@ -275,14 +369,15 @@ def compare_experiments(
         },
         "confounds": _confounds(entries),
     }
-    out_dir = settings.data_dir("reports") / report_id
-    out_dir.mkdir(parents=True)
-    write_json(out_dir / "comparison.json", report)
-    (out_dir / "comparison.md").write_bytes(render_markdown(report).encode("utf-8"))
-    report["paths"] = {
-        "json": str(out_dir / "comparison.json"),
-        "markdown": str(out_dir / "comparison.md"),
-    }
+    if write:
+        out_dir = settings.data_dir("reports") / report_id
+        out_dir.mkdir(parents=True)
+        write_json(out_dir / "comparison.json", report)
+        (out_dir / "comparison.md").write_bytes(render_markdown(report).encode("utf-8"))
+        report["paths"] = {
+            "json": f"reports/{report_id}/comparison.json",
+            "markdown": f"reports/{report_id}/comparison.md",
+        }
     return report
 
 
@@ -316,6 +411,16 @@ def render_markdown(report: dict[str, Any]) -> str:
             "Model ranking uses validation metrics only (see *Validation ranking*).",
             "",
         ]
+    if report.get("selection_bias_note"):
+        lines += [f"**Selection bias:** {report['selection_bias_note']}", ""]
+    device = report.get("latency_device")
+    lines += [
+        f"Latency: model forward pass only, measured on **{device}** only "
+        "(`visionbench latency`); other devices are never mixed in."
+        if device
+        else "Latency: not reported (no `--latency-device` given).",
+        "",
+    ]
     lines += [
         "## Models",
         "",
@@ -351,11 +456,15 @@ def render_markdown(report: dict[str, Any]) -> str:
     ]
     for r in report["rows"]:
         s = r[split]
+        uses = str(r["test_evaluations"])
+        if r["forced_test_reasons"]:
+            uses += " (forced: " + "; ".join(f'"{x}"' for x in r["forced_test_reasons"]) + ")"
+        checkpoint = r["checkpoint"] + (f" (pinned `{r['eval_id']}`)" if r["eval_pinned"] else "")
         lines.append(
-            f"| `{r['experiment_id']}` | {r['model']} | {r['checkpoint']} | "
+            f"| `{r['experiment_id']}` | {r['model']} | {checkpoint} | "
             f"{_ci(s['accuracy'], s['accuracy_ci'])} | "
             f"{_ci(s['balanced_accuracy'], s['balanced_accuracy_ci'])} | "
-            f"{_ci(s['macro_f1'], s['macro_f1_ci'])} | {r['test_evaluations']} |"
+            f"{_ci(s['macro_f1'], s['macro_f1_ci'])} | {uses} |"
         )
     pb = report["paired_bootstrap"]
     lines += [

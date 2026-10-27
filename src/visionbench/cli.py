@@ -313,7 +313,8 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
         batch_size=args.batch_size,
         bootstrap_resamples=args.bootstrap,
         seed=args.seed,
-        latency=not args.no_latency,
+        force=args.force,
+        reason=args.reason,
         on_warning=warn,
     )
     doc, m = r.metrics, r.metrics["metrics"]
@@ -353,6 +354,30 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_latency(args: argparse.Namespace) -> int:
+    from visionbench.evaluation.latency import measure_experiment_latency
+
+    r = measure_experiment_latency(
+        args.experiment_id,
+        _settings(),
+        device=args.device,
+        warmup=args.warmup,
+        iterations=args.iterations,
+    )
+    m = r.measurement
+    print(
+        f"latency {r.latency_id}: experiment {r.experiment_id} ({m['model']}) on {m['device']} "
+        f"({m['device_name']}, {m['torch_threads']} threads, {m['input_size']} px, "
+        f"warmup {m['warmup']}, {m['iterations']} iterations; {m['scope']})"
+    )
+    for bs, v in m["batch_sizes"].items():
+        print(
+            f"  batch {bs:>3}: median {v['median_ms']:.3f} ms  p95 {v['p95_ms']:.3f} ms  "
+            f"({v['median_ms_per_image']:.3f} ms/image)"
+        )
+    return 0
+
+
 def _cmd_compare(args: argparse.Namespace) -> int:
     from visionbench.evaluation.compare import compare_experiments
 
@@ -364,6 +389,8 @@ def _cmd_compare(args: argparse.Namespace) -> int:
         resamples=args.bootstrap,
         seed=args.seed,
         note=args.note,
+        eval_ids=args.eval_ids,
+        latency_device=args.latency_device,
     )
     print(
         f"comparison {report['report_id']} on {args.split.upper()}: "
@@ -498,8 +525,22 @@ def build_parser() -> argparse.ArgumentParser:
     ev.add_argument("--batch-size", type=int, default=64)
     ev.add_argument("--bootstrap", type=int, default=1000, help="bootstrap resamples for CIs")
     ev.add_argument("--seed", type=int, default=0, help="bootstrap seed")
-    ev.add_argument("--no-latency", action="store_true", help="skip latency measurement")
+    ev.add_argument(
+        "--force",
+        action="store_true",
+        help="allow a repeated TEST evaluation of the same experiment+checkpoint (needs --reason)",
+    )
+    ev.add_argument("--reason", help="why the TEST evaluation is repeated (stored and reported)")
     ev.set_defaults(func=_cmd_evaluate)
+
+    lat = sub.add_parser(
+        "latency", parents=[common], help="measure forward-pass latency (random input, no split)"
+    )
+    lat.add_argument("experiment_id")
+    lat.add_argument("--device", choices=["cpu", "cuda"], required=True)
+    lat.add_argument("--warmup", type=int, default=10)
+    lat.add_argument("--iterations", type=int, default=50)
+    lat.set_defaults(func=_cmd_latency)
 
     cmp_ = sub.add_parser("compare", parents=[common], help="compare evaluated experiments")
     cmp_.add_argument("experiment_ids", nargs="+")
@@ -512,6 +553,12 @@ def build_parser() -> argparse.ArgumentParser:
     cmp_.add_argument("--bootstrap", type=int, default=1000)
     cmp_.add_argument("--seed", type=int, default=0)
     cmp_.add_argument("--note", help="text shown at the top of the report")
+    cmp_.add_argument(
+        "--eval-ids", nargs="+", default=[], help="pin specific evaluations (one per experiment)"
+    )
+    cmp_.add_argument(
+        "--latency-device", choices=["cpu", "cuda"], help="report latency measured on this device"
+    )
     cmp_.set_defaults(func=_cmd_compare)
 
     evs = sub.add_parser("evaluations", parents=[common], help="list recorded evaluations")

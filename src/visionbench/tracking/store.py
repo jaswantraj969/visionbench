@@ -1,9 +1,12 @@
 """SQLite experiment store (SQLAlchemy) at ``<data_root>/db/visionbench.db``.
 
-Schema is created with ``create_all``; a ``schema_version`` table records the version. The only
-supported upgrade is 1 -> 2 (M3 added the ``evaluations`` table, which ``create_all`` creates);
-any other stored version is an error. Status transitions are enforced:
-pending -> running -> completed | failed | cancelled (pending may also go to failed/cancelled).
+Schema is created with ``create_all``; a ``schema_version`` table records the version. All
+upgrades so far are additive: new tables (``create_all``) and new nullable/defaulted columns
+(``ALTER TABLE ... ADD COLUMN`` from :data:`_COLUMN_UPGRADES`). History: v1 (M2) experiments,
+epoch_metrics, artifacts; v2 (M3) evaluations; v3 (M4 step 0) evaluations.forced/reason and
+latency_measurements. A stored version newer than this code is an error. Status transitions
+are enforced: pending -> running -> completed | failed | cancelled (pending may also go to
+failed/cancelled).
 """
 
 from __future__ import annotations
@@ -15,6 +18,8 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import (
+    Boolean,
+    Engine,
     Float,
     ForeignKey,
     Integer,
@@ -28,8 +33,11 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 from visionbench.core.errors import VisionBenchError
 
-SCHEMA_VERSION = 2
-_ADDITIVE_UPGRADES = {1}  # versions upgraded by create_all alone (new tables only)
+SCHEMA_VERSION = 3
+# Columns added to tables after they were first created (older DBs get ALTER TABLE ADD COLUMN).
+_COLUMN_UPGRADES: dict[str, dict[str, str]] = {
+    "evaluations": {"forced": "BOOLEAN NOT NULL DEFAULT 0", "reason": "TEXT"},
+}
 DB_FILENAME = "visionbench.db"
 STATUSES = ("pending", "running", "completed", "failed", "cancelled")
 _TRANSITIONS = {
@@ -120,6 +128,25 @@ class Evaluation(Base):
     metrics_path: Mapped[str] = mapped_column(String(255))  # relative to the data root
     predictions_sha256: Mapped[str] = mapped_column(String(64))
     visionbench_version: Mapped[str] = mapped_column(String(32))
+    forced: Mapped[bool] = mapped_column(Boolean, default=False)  # repeated test eval, forced
+    reason: Mapped[str | None] = mapped_column(Text)  # required when forced
+
+
+class LatencyMeasurement(Base):
+    __tablename__ = "latency_measurements"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    experiment_id: Mapped[str] = mapped_column(ForeignKey("experiments.id"), index=True)
+    checkpoint: Mapped[str] = mapped_column(String(16))
+    device: Mapped[str] = mapped_column(String(8))  # "cpu" | "cuda"
+    device_name: Mapped[str] = mapped_column(String(128))
+    torch_threads: Mapped[int] = mapped_column(Integer)
+    input_size: Mapped[int] = mapped_column(Integer)
+    warmup: Mapped[int] = mapped_column(Integer)
+    iterations: Mapped[int] = mapped_column(Integer)
+    results_json: Mapped[str] = mapped_column(Text)  # {batch size: {median_ms, p95_ms, ...}}
+    path: Mapped[str] = mapped_column(String(255))  # latency.json, relative to the data root
+    created_at: Mapped[str] = mapped_column(String(32))
+    visionbench_version: Mapped[str] = mapped_column(String(32))
 
 
 _EPOCH_FIELDS = (
@@ -138,22 +165,38 @@ def _row(obj: Base) -> dict[str, Any]:
     return {c.name: getattr(obj, c.name) for c in obj.__table__.columns}
 
 
+def open_engine(db_path: Path) -> Engine:
+    """Engine for the tracking DB with the schema created/upgraded to :data:`SCHEMA_VERSION`."""
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    engine = create_engine(f"sqlite:///{db_path.as_posix()}")
+    with engine.begin() as conn:
+        versions = (
+            [r[0] for r in conn.exec_driver_sql("SELECT version FROM schema_version")]
+            if engine.dialect.has_table(conn, "schema_version")
+            else []
+        )
+    if len(versions) > 1 or (versions and not 1 <= versions[0] <= SCHEMA_VERSION):
+        engine.dispose()
+        raise TrackingError(f"database schema version {versions} != supported {SCHEMA_VERSION}")
+    Base.metadata.create_all(engine)
+    with engine.begin() as conn:  # additive column upgrades for tables created by older code
+        for table, columns in _COLUMN_UPGRADES.items():
+            existing = {r[1] for r in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
+            for column, ddl in columns.items():
+                if column not in existing:
+                    conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+    with Session(engine) as s, s.begin():
+        if versions != [SCHEMA_VERSION]:
+            if versions:
+                s.delete(s.get(SchemaVersion, versions[0]))
+                s.flush()
+            s.add(SchemaVersion(version=SCHEMA_VERSION, applied_at=utcnow()))
+    return engine
+
+
 class ExperimentStore:
     def __init__(self, db_path: Path) -> None:
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.engine = create_engine(f"sqlite:///{db_path.as_posix()}")
-        Base.metadata.create_all(self.engine)
-        with Session(self.engine) as s, s.begin():
-            versions = s.scalars(select(SchemaVersion.version)).all()
-            if not versions:
-                s.add(SchemaVersion(version=SCHEMA_VERSION, applied_at=utcnow()))
-            elif len(versions) == 1 and versions[0] in _ADDITIVE_UPGRADES:
-                s.delete(s.get(SchemaVersion, versions[0]))
-                s.add(SchemaVersion(version=SCHEMA_VERSION, applied_at=utcnow()))
-            elif versions != [SCHEMA_VERSION]:
-                raise TrackingError(
-                    f"database schema version {versions} != supported {SCHEMA_VERSION}"
-                )
+        self.engine = open_engine(db_path)
 
     def close(self) -> None:
         self.engine.dispose()
@@ -285,6 +328,8 @@ class ExperimentStore:
         metrics_path: str,
         predictions_sha256: str,
         visionbench_version: str,
+        forced: bool = False,
+        reason: str | None = None,
     ) -> None:
         with Session(self.engine) as s, s.begin():
             self._get(s, experiment_id)
@@ -298,8 +343,17 @@ class ExperimentStore:
                     metrics_path=metrics_path,
                     predictions_sha256=predictions_sha256,
                     visionbench_version=visionbench_version,
+                    forced=forced,
+                    reason=reason,
                 )
             )
+
+    def get_evaluation(self, eval_id: str) -> dict[str, Any]:
+        with Session(self.engine) as s:
+            row = s.get(Evaluation, eval_id)
+            if row is None:
+                raise TrackingError(f"evaluation {eval_id} not found")
+            return _row(row)
 
     def evaluations(
         self,
@@ -317,3 +371,22 @@ class ExperimentStore:
             if checkpoint is not None:
                 q = q.where(Evaluation.checkpoint == checkpoint)
             return [_row(r) for r in s.scalars(q.order_by(Evaluation.created_at, _INSERTION_ORDER))]
+
+    # --- latency --------------------------------------------------------------------------
+
+    def add_latency(self, **fields: Any) -> None:
+        with Session(self.engine) as s, s.begin():
+            self._get(s, fields["experiment_id"])
+            s.add(LatencyMeasurement(created_at=utcnow(), **fields))
+
+    def latencies(
+        self, experiment_id: str | None = None, *, device: str | None = None
+    ) -> list[dict[str, Any]]:
+        with Session(self.engine) as s:
+            q = select(LatencyMeasurement)
+            if experiment_id is not None:
+                q = q.where(LatencyMeasurement.experiment_id == experiment_id)
+            if device is not None:
+                q = q.where(LatencyMeasurement.device == device)
+            order = (LatencyMeasurement.created_at, _INSERTION_ORDER)
+            return [_row(r) for r in s.scalars(q.order_by(*order))]

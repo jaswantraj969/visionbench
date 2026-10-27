@@ -23,6 +23,8 @@ from visionbench.evaluation.data import (
     EvaluationError,
     LoadedModel,
     build_eval_dataloader,
+    check_test_reuse,
+    checkpoint_name,
     load_for_evaluation,
     open_for_evaluation,
     select_eval_entries,
@@ -104,24 +106,32 @@ def evaluate_experiment(
     batch_size: int = 64,
     bootstrap_resamples: int = DEFAULT_BOOTSTRAP,
     seed: int = 0,
-    latency: bool = True,
-    latency_warmup: int = efficiency.DEFAULT_WARMUP,
-    latency_iterations: int = efficiency.DEFAULT_ITERATIONS,
+    force: bool = False,
+    reason: str | None = None,
     on_warning: Callable[[str], None] | None = None,
 ) -> EvalResult:
+    """Evaluate a completed experiment on val or test.
+
+    A repeated TEST evaluation of the same experiment + checkpoint raises
+    :class:`RepeatedTestEvaluationError` unless ``force`` and a non-empty ``reason`` are given;
+    forced repeats are recorded (``forced``, ``reason``) and shown in every report.
+    Latency is not measured here (see :mod:`visionbench.evaluation.latency`).
+    """
     data_root = settings.resolved_data_root
     dev = resolve_device(device)
     with ExperimentStore(settings.data_dir("db") / DB_FILENAME) as store:
-        source = open_for_evaluation(store, settings, exp_id, checkpoint)
-        select_eval_entries(source.pre.manifest, split)  # validates the split name early
-        prior_same = len(store.evaluations(exp_id, split="test", checkpoint=source.checkpoint))
+        exp_row = store.get(exp_id)
+        name = checkpoint_name(exp_row, checkpoint)
+        select_eval_entries({"entries": []}, split)  # validates the split name before any work
+        prior_same = check_test_reuse(store, exp_id, split, name, force=force, reason=reason)
         prior_all = len(store.evaluations(exp_id, split="test"))
+        forced = split == "test" and prior_same > 0
+        source = open_for_evaluation(store, settings, exp_id, checkpoint)
         warning = None
-        if split == "test" and prior_same:
+        if forced:
             warning = (
-                f"experiment {exp_id} checkpoint '{source.checkpoint}' has already been "
-                f"evaluated on TEST {prior_same} time(s); this is test evaluation "
-                f"#{prior_same + 1}. Repeated test evaluation is recorded and reported."
+                f"FORCED repeated TEST evaluation #{prior_same + 1} of experiment {exp_id} "
+                f"checkpoint '{source.checkpoint}'; reason recorded: {reason}"
             )
             if on_warning is not None:
                 on_warning(warning)
@@ -143,22 +153,8 @@ def evaluate_experiment(
 
         resolved = source.run_config["resolved"]
         if isinstance(loaded.model, MajorityBaseline):
-            lat = efficiency.not_applicable(
-                "majority_baseline has no forward pass (constant prediction from train priors)"
-            )
             params = {"total": None, "trainable": None}
         else:
-            lat = (
-                efficiency.measure_latency(
-                    loaded.model,
-                    loaded.input_size,
-                    dev,
-                    warmup=latency_warmup,
-                    iterations=latency_iterations,
-                )
-                if latency
-                else efficiency.not_applicable("skipped (--no-latency)")
-            )
             params = {
                 "total": resolved["model"]["param_count"],
                 "trainable": resolved["model"]["trainable_param_count"],
@@ -171,7 +167,7 @@ def evaluate_experiment(
             "checkpoint_size_bytes": source.checkpoint_path.stat().st_size,
             "train_seconds": source.experiment["train_seconds"],
             "input_size": loaded.input_size,
-            "latency": lat,
+            "latency": "measured separately: `visionbench latency <exp_id> --device cpu|cuda`",
         }
 
         eval_id = f"ev-{datetime.now(UTC):%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:6]}"
@@ -211,6 +207,8 @@ def evaluate_experiment(
                 "prior_test_evaluations_same_checkpoint": prior_same,
                 "prior_test_evaluations_experiment": prior_all,
                 "test_evaluation_number": prior_same + 1 if split == "test" else None,
+                "forced": forced,
+                "reason": reason if forced else None,
             },
             "metrics": point,
             "bootstrap": cis,
@@ -241,5 +239,7 @@ def evaluate_experiment(
             metrics_path=(eval_dir / "metrics.json").relative_to(data_root).as_posix(),
             predictions_sha256=pred_sha,
             visionbench_version=__version__,
+            forced=forced,
+            reason=reason if forced else None,
         )
     return EvalResult(eval_id, exp_id, split, source.checkpoint, eval_dir, doc, prior_same, warning)
