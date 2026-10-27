@@ -1,0 +1,271 @@
+{
+  "label": "pilot - excluded from benchmark results",
+  "started_at": "2026-10-27T19:50:46+00:00",
+  "timing": [
+    {
+      "model": "small_cnn_scratch_64",
+      "batch_size": 64,
+      "wall_seconds": 107.67,
+      "experiment_id": "exp-20261027-195104-d067aa",
+      "status": "completed",
+      "fits": true,
+      "peak_gpu_memory_mib": 242.0,
+      "gpu": "NVIDIA GeForce RTX 3050 6GB Laptop GPU",
+      "epoch_seconds": 56.3,
+      "steps_per_epoch": 296,
+      "process_wall_seconds": 117.77
+    },
+    {
+      "model": "resnet18_imagenet_224",
+      "batch_size": 64,
+      "wall_seconds": 192.67,
+      "experiment_id": "exp-20261027-195257-71ff25",
+      "status": "completed",
+      "fits": true,
+      "peak_gpu_memory_mib": 1594.6,
+      "gpu": "NVIDIA GeForce RTX 3050 6GB Laptop GPU",
+      "epoch_seconds": 178.43,
+      "steps_per_epoch": 296,
+      "process_wall_seconds": 203.58
+    },
+    {
+      "model": "efficientnet_b0_imagenet_224",
+      "batch_size": 64,
+      "wall_seconds": 272.31,
+      "experiment_id": "exp-20261027-195620-f1a5b1",
+      "status": "completed",
+      "fits": true,
+      "peak_gpu_memory_mib": 5597.0,
+      "gpu": "NVIDIA GeForce RTX 3050 6GB Laptop GPU",
+      "epoch_seconds": 256.59,
+      "steps_per_epoch": 296,
+      "process_wall_seconds": 281.81
+    },
+    {
+      "model": "resnet18_scratch_64",
+      "batch_size": 64,
+      "wall_seconds": 34.74,
+      "experiment_id": "exp-20261027-200055-e5454a",
+      "status": "completed",
+      "fits": true,
+      "peak_gpu_memory_mib": 345.1,
+      "gpu": "NVIDIA GeForce RTX 3050 6GB Laptop GPU",
+      "epoch_seconds": 31.55,
+      "steps_per_epoch": 296,
+      "process_wall_seconds": 39.24
+    }
+  ],
+  "determinism": [
+    {
+      "model": "small_cnn_scratch_64",
+      "max_steps": 50,
+      "runs": [
+        "exp-20261027-200135-3899f9",
+        "exp-20261027-200150-c2cda6"
+      ],
+      "epochs_compared": 1,
+      "history_fields": [
+        "train_loss",
+        "val_loss",
+        "val_accuracy",
+        "val_balanced_accuracy",
+        "steps"
+      ],
+      "history_bitwise_identical": true,
+      "history_a": [
+        {
+          "train_loss": 1.1594787395000459,
+          "val_loss": 0.9496718343098959,
+          "val_accuracy": 0.6548148148148148,
+          "val_balanced_accuracy": 0.6581333333333333,
+          "steps": 50
+        }
+      ],
+      "history_b": [
+        {
+          "train_loss": 1.1594787395000459,
+          "val_loss": 0.9496718343098959,
+          "val_accuracy": 0.6548148148148148,
+          "val_balanced_accuracy": 0.6581333333333333,
+          "steps": 50
+        }
+      ],
+      "best_pt_tensors": 26,
+      "best_pt_tensors_differing": 0,
+      "best_pt_bitwise_identical": true,
+      "max_abs_difference": 0.0,
+      "first_differing_tensors": []
+    },
+    {
+      "model": "resnet18_imagenet_224",
+      "max_steps": 50,
+      "runs": [
+        "exp-20261027-200206-c48f45",
+        "exp-20261027-200247-2922d3"
+      ],
+      "epochs_compared": 1,
+      "history_fields": [
+        "train_loss",
+        "val_loss",
+        "val_accuracy",
+        "val_balanced_accuracy",
+        "steps"
+      ],
+      "history_bitwise_identical": true,
+      "history_a": [
+        {
+          "train_loss": 0.5990031899511814,
+          "val_loss": 0.22952461475943342,
+          "val_accuracy": 0.9244444444444444,
+          "val_balanced_accuracy": 0.9206888888888887,
+          "steps": 50
+        }
+      ],
+      "history_b": [
+        {
+          "train_loss": 0.5990031899511814,
+          "val_loss": 0.22952461475943342,
+          "val_accuracy": 0.9244444444444444,
+          "val_balanced_accuracy": 0.9206888888888887,
+          "steps": 50
+        }
+      ],
+      "best_pt_tensors": 122,
+      "best_pt_tensors_differing": 0,
+      "best_pt_bitwise_identical": true,
+      "max_abs_difference": 0.0,
+      "first_differing_tensors": []
+    },
+    {
+      "model": "efficientnet_b0_imagenet_224",
+      "max_steps": 50,
+      "runs": [
+        "exp-20261027-200329-f8e6f2",
+        "exp-20261027-200432-7e3622"
+      ],
+      "epochs_compared": 1,
+      "history_fields": [
+        "train_loss",
+        "val_loss",
+        "val_accuracy",
+        "val_balanced_accuracy",
+        "steps"
+      ],
+      "history_bitwise_identical": true,
+      "history_a": [
+        {
+          "train_loss": 1.4608349752426149,
+          "val_loss": 0.6476919532705236,
+          "val_accuracy": 0.8604938271604938,
+          "val_balanced_accuracy": 0.8509333333333332,
+          "steps": 50
+        }
+      ],
+      "history_b": [
+        {
+          "train_loss": 1.4608349752426149,
+          "val_loss": 0.6476919532705236,
+          "val_accuracy": 0.8604938271604938,
+          "val_balanced_accuracy": 0.8509333333333332,
+          "steps": 50
+        }
+      ],
+      "best_pt_tensors": 360,
+      "best_pt_tensors_differing": 0,
+      "best_pt_bitwise_identical": true,
+      "max_abs_difference": 0.0,
+      "first_differing_tensors": []
+    },
+    {
+      "model": "resnet18_scratch_64",
+      "max_steps": 50,
+      "runs": [
+        "exp-20261027-200540-23c1f7",
+        "exp-20261027-200559-c3d495"
+      ],
+      "epochs_compared": 1,
+      "history_fields": [
+        "train_loss",
+        "val_loss",
+        "val_accuracy",
+        "val_balanced_accuracy",
+        "steps"
+      ],
+      "history_bitwise_identical": true,
+      "history_a": [
+        {
+          "train_loss": 1.391421482563019,
+          "val_loss": 1.0655393607233778,
+          "val_accuracy": 0.6380246913580246,
+          "val_balanced_accuracy": 0.6318222222222223,
+          "steps": 50
+        }
+      ],
+      "history_b": [
+        {
+          "train_loss": 1.391421482563019,
+          "val_loss": 1.0655393607233778,
+          "val_accuracy": 0.6380246913580246,
+          "val_balanced_accuracy": 0.6318222222222223,
+          "steps": 50
+        }
+      ],
+      "best_pt_tensors": 122,
+      "best_pt_tensors_differing": 0,
+      "best_pt_bitwise_identical": true,
+      "max_abs_difference": 0.0,
+      "first_differing_tensors": []
+    }
+  ],
+  "budget": {
+    "assumption": "every run trains the full 25 epochs (early stopping ignored); baseline runs (seconds) not included",
+    "per_model": [
+      {
+        "model": "small_cnn_scratch_64",
+        "epoch_seconds": 56.3,
+        "per_run_overhead_seconds": 61.5,
+        "upper_bound_per_run_seconds": 1469.0,
+        "upper_bound_3_seeds_seconds": 4406.9
+      },
+      {
+        "model": "resnet18_imagenet_224",
+        "epoch_seconds": 178.43,
+        "per_run_overhead_seconds": 25.2,
+        "upper_bound_per_run_seconds": 4485.9,
+        "upper_bound_3_seeds_seconds": 13457.7
+      },
+      {
+        "model": "efficientnet_b0_imagenet_224",
+        "epoch_seconds": 256.59,
+        "per_run_overhead_seconds": 25.2,
+        "upper_bound_per_run_seconds": 6440.0,
+        "upper_bound_3_seeds_seconds": 19319.9
+      },
+      {
+        "model": "resnet18_scratch_64",
+        "epoch_seconds": 31.55,
+        "per_run_overhead_seconds": 7.7,
+        "upper_bound_per_run_seconds": 796.4,
+        "upper_bound_3_seeds_seconds": 2389.3
+      }
+    ],
+    "upper_bound_total_hours": 10.99,
+    "limit_hours": 6,
+    "within_limit": false
+  },
+  "finished_at": "2026-10-27T20:06:11+00:00",
+  "pilot_experiment_ids": [
+    "exp-20261027-195104-d067aa",
+    "exp-20261027-195257-71ff25",
+    "exp-20261027-195620-f1a5b1",
+    "exp-20261027-200055-e5454a",
+    "exp-20261027-200135-3899f9",
+    "exp-20261027-200150-c2cda6",
+    "exp-20261027-200206-c48f45",
+    "exp-20261027-200247-2922d3",
+    "exp-20261027-200329-f8e6f2",
+    "exp-20261027-200432-7e3622",
+    "exp-20261027-200540-23c1f7",
+    "exp-20261027-200559-c3d495"
+  ]
+}
