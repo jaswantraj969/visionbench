@@ -11,7 +11,8 @@ from visionbench.core.config import Settings
 
 
 def _client(data_root: Path) -> TestClient:
-    return TestClient(api_main.create_app(Settings(_env_file=None, data_root=data_root)))
+    app = api_main.create_app(Settings(_env_file=None, data_root=data_root))
+    return TestClient(app, base_url="http://127.0.0.1")
 
 
 def test_health(tmp_path: Path) -> None:
@@ -63,7 +64,7 @@ def test_unknown_route_uses_error_schema(tmp_path: Path) -> None:
 
 
 def test_method_not_allowed_uses_error_schema(tmp_path: Path) -> None:
-    r = _client(tmp_path).post("/api/health")
+    r = _client(tmp_path).post("/api/health", headers={"X-VisionBench-Request": "1"})
     assert r.status_code == 405
     assert r.json()["error"]["code"] == "http_405"
 
@@ -75,6 +76,7 @@ def test_unhandled_exception_uses_error_schema(tmp_path: Path) -> None:
     def boom() -> None:
         raise RuntimeError("secret detail")
 
-    r = TestClient(app, raise_server_exceptions=False).get("/api/_boom")
+    client = TestClient(app, base_url="http://127.0.0.1", raise_server_exceptions=False)
+    r = client.get("/api/_boom")
     assert r.status_code == 500
     assert r.json() == {"error": {"code": "internal_error", "message": "internal server error"}}

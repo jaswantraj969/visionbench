@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     api_host: str = "127.0.0.1"
     api_port: int = Field(default=8000, ge=1, le=65535)
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    # Host header names accepted besides localhost / 127.0.0.1 / [::1] (DNS-rebinding guard).
+    extra_trusted_hosts: list[str] = []
     max_queued_jobs: int = Field(default=10, ge=1)
     worker_poll_seconds: float = Field(default=0.5, gt=0)
     worker_heartbeat_seconds: float = Field(default=2.0, gt=0)

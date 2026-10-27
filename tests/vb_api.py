@@ -11,21 +11,30 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from visionbench.api.main import create_app
+from visionbench.api.security import CLIENT_HEADER, UNSAFE_METHODS
 from visionbench.core.config import Settings
 from visionbench.jobs.store import JobStore
 from visionbench.jobs.worker import execute_job
 from visionbench.tracking.store import DB_FILENAME
 
+LOCAL_BASE_URL = "http://127.0.0.1"
+
 
 class RecordingClient:
-    """TestClient wrapper that keeps every response body (for the path-hygiene check)."""
+    """TestClient wrapper that keeps every response body (for the path-hygiene check).
+
+    Requests go to a local Host (127.0.0.1) and state-changing ones carry the required
+    ``X-VisionBench-Request: 1`` header unless ``client_header=False``.
+    """
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.client = TestClient(create_app(settings))
+        self.client = TestClient(create_app(settings), base_url=LOCAL_BASE_URL)
         self.bodies: list[str] = []
 
-    def request(self, method: str, url: str, **kw: Any):
+    def request(self, method: str, url: str, *, client_header: bool = True, **kw: Any):
+        if client_header and method.upper() in UNSAFE_METHODS:
+            kw["headers"] = {CLIENT_HEADER: "1"} | dict(kw.get("headers") or {})
         r = self.client.request(method, url, **kw)
         if not r.headers.get("content-type", "").startswith("image/"):
             self.bodies.append(r.text)
@@ -84,7 +93,12 @@ def chunked(data: bytes, size: int = 64 << 10) -> Iterator[bytes]:
 
 
 def upload(
-    client: RecordingClient, zip_bytes: bytes, name: str = "shapes", filename: str = "shapes.zip"
+    client: RecordingClient,
+    zip_bytes: bytes,
+    name: str = "shapes",
+    filename: str = "shapes.zip",
+    **kw: Any,
 ):
     body, ctype = multipart({"name": name}, filename, zip_bytes)
-    return client.post("/api/datasets/uploads", content=body, headers={"content-type": ctype})
+    headers = {"content-type": ctype} | kw.pop("headers", {})
+    return client.post("/api/datasets/uploads", content=body, headers=headers, **kw)

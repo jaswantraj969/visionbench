@@ -3,6 +3,9 @@
 The API is a thin layer: it validates input, reads state, and enqueues jobs for the single
 worker (``visionbench worker``); no training, evaluation or import runs inside a request.
 There is no authentication: bind to localhost only (``visionbench serve`` refuses other hosts).
+:mod:`visionbench.api.security` protects it against cross-site requests from the user's browser
+(Host allow-list, required ``X-VisionBench-Request: 1`` header + Origin check on state-changing
+methods, ``nosniff``).
 
 Every error response uses ``{"error": {"code": str, "message": str}}``; every JSON body is
 scrubbed of absolute paths (data root, import root, torch home).
@@ -22,6 +25,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from visionbench import __version__
 from visionbench.api.errors import ApiError, make_response_class, map_exception
+from visionbench.api.security import CLIENT_HEADER, LOCAL_HOSTS, LocalRequestGuard
 from visionbench.core.config import Settings, get_settings
 from visionbench.core.errors import VisionBenchError
 from visionbench.core.redact import scrub_paths
@@ -70,16 +74,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         description="Local benchmarking API. No authentication: bind to 127.0.0.1 only.",
     )
     app.state.settings = settings
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_origins,
-        allow_methods=["GET", "POST"],
-        allow_headers=["content-type"],
-    )
 
     def err(status: int, code: str, message: str) -> JSONResponse:
         body = {"error": {"code": code, "message": scrub_paths(message, roots)}}
         return response_class(status_code=status, content=body)
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_methods=["GET", "POST"],
+        allow_headers=["content-type", CLIENT_HEADER],
+    )
+    # Added last = outermost: every response (CORS preflights and rejections included) passes
+    # through it and gets nosniff; a bad Host never reaches CORS or the routes.
+    app.add_middleware(
+        LocalRequestGuard,
+        allowed_hosts=[*LOCAL_HOSTS, *settings.extra_trusted_hosts],
+        allowed_origins=settings.cors_origins,
+        error_response=err,
+    )
 
     @app.exception_handler(ApiError)
     async def _api_error(_: Request, exc: ApiError) -> JSONResponse:
