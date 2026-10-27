@@ -2,11 +2,20 @@
 
 Subcommands (all take the protocol folder, e.g. ``benchmarks/eurosat-v1``):
 
-- ``train``: for every protocol model x seed 0/1/2, in protocol order, run
-  ``visionbench train --config <yaml> --seed <s>``. Before anything runs, the YAMLs and
-  BENCHMARK_PROTOCOL.md are checked against ``PROTOCOL_HASHES.txt``. Runs that are already
-  completed in ``runs.json`` are skipped. A failed run is retried at most once with the identical
-  config, and both attempts are recorded.
+- ``train [--only m1,m2]``: for every protocol model x seed 0/1/2, in the run order below, run
+  ``visionbench train --config <yaml> --seed <s>``.
+  - Before anything runs, the YAMLs and BENCHMARK_PROTOCOL.md are checked against
+    ``PROTOCOL_HASHES.txt``.
+  - The driver is resumable: runs already completed in ``runs.json`` are skipped.
+  - Each attempt is recorded as ``in_progress`` before it starts. If the driver or session dies
+    (sleep, power loss, crash, killed process), the next ``train`` marks that attempt
+    ``interrupted``, with an infrastructure reason, and reruns it from scratch with the identical
+    config. Interruptions do not count toward the retry limit.
+  - A run that itself fails is retried at most once with the identical config, and both attempts
+    are recorded.
+  - A CUDA out-of-memory failure stops the driver instead, for a human to judge.
+  - While training, Windows is asked not to sleep (``SetThreadExecutionState``; process-scoped).
+- ``annotate <index> <text>``: add the known cause of an interruption to a ``runs.json`` entry.
 - ``evaluate-val``: evaluate each completed run's val-selected checkpoint on **VAL** (never test).
 - ``latency``: CPU and CUDA latency for seed 0 of each trainable model.
 - ``check``: assert that no evaluation with split=test exists for any benchmark or pilot
@@ -30,20 +39,36 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+# Run order fixed by the supervisor (VB-B1 budget decision); seeds 0, 1, 2 within each model.
 MODELS = (
     "majority_baseline",
+    "resnet18_scratch_64",
     "small_cnn_scratch_64",
     "resnet18_imagenet_224",
     "efficientnet_b0_imagenet_224",
-    "resnet18_scratch_64",
 )
 TRAINABLE = MODELS[1:]
+INTERRUPTED = (
+    "infrastructure interruption: the driver/session ended while this run was in progress, so no "
+    "outcome was recorded; rerun from scratch with the identical config (not counted toward the "
+    "one-retry limit; GPU determinism was verified bitwise in the pilot)"
+)
+OOM_MARKERS = ("OutOfMemoryError", "CUDA out of memory")
 SEEDS = (0, 1, 2)
 LOW_INFO_CLASSES = {"SeaLake": "78 % low-information", "Forest": "34 % low-information"}
 VAL_LABEL = "VALIDATION (selection-biased) — not test results"
 EXP_RE = re.compile(r"experiment (exp-\d{8}-\d{6}-[0-9a-f]{6}) running")
 EVAL_RE = re.compile(r"\b(ev-\d{8}-\d{6}-[0-9a-f]{6})\b")
 LAT_RE = re.compile(r"\b(lat-\d{8}-\d{6}-[0-9a-f]{6})\b")
+
+
+def _keep_awake() -> None:
+    """Ask Windows not to sleep while this process runs (released when it exits)."""
+    if sys.platform == "win32":
+        import ctypes
+
+        es_continuous, es_system_required = 0x80000000, 0x00000001
+        ctypes.windll.kernel32.SetThreadExecutionState(es_continuous | es_system_required)
 
 
 def now() -> str:
@@ -96,16 +121,16 @@ class Benchmark:
         return out
 
     def cli(self, args: list[str], log: Path) -> tuple[int, str]:
-        proc = subprocess.run(
-            [sys.executable, "-m", "visionbench.cli", *args],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
-        text = f"> visionbench {' '.join(args)}\n{proc.stdout}{proc.stderr}"
-        log.write_text(text, encoding="utf-8")
-        return proc.returncode, proc.stdout + proc.stderr
+        """Run the CLI with output streamed to ``log`` (readable while it runs)."""
+        with open(log, "w", encoding="utf-8") as f:
+            f.write(f"> visionbench {' '.join(args)}\n")
+            f.flush()
+            code = subprocess.run(
+                [sys.executable, "-m", "visionbench.cli", *args],
+                stdout=f,
+                stderr=subprocess.STDOUT,
+            ).returncode
+        return code, log.read_text(encoding="utf-8", errors="replace")
 
     def store(self):  # noqa: ANN201
         from visionbench.tracking.store import DB_FILENAME, ExperimentStore
@@ -114,34 +139,89 @@ class Benchmark:
 
     # --- subcommands ------------------------------------------------------------------------
 
-    def train(self) -> None:
+    def train(self, only: list[str] | None = None) -> None:
         hashes = self.verify_hashes()
-        done = {k for k, r in self.final_runs().items() if r["status"] == "completed"}
+        self._mark_interrupted()
+        _keep_awake()
         for model in MODELS:
+            if only and model not in only:
+                continue
             yaml_path = self.dir / f"{model}.yaml"
             for seed in SEEDS:
-                if (model, seed) in done:
+                attempts = [
+                    r for r in self.data["runs"] if (r["model"], r["seed"]) == (model, seed)
+                ]
+                if any(r["status"] == "completed" for r in attempts):
                     print(f"skip {model} seed {seed}: completed already", flush=True)
                     continue
-                for attempt in (1, 2):
-                    rec = self._train_one(model, yaml_path, seed, attempt, hashes)
+                failures = sum(r["status"] in ("failed", "cancelled") for r in attempts)
+                while failures < 2:
+                    rec = self._train_one(model, yaml_path, seed, len(attempts) + 1, hashes)
+                    attempts.append(rec)
                     if rec["status"] == "completed":
                         break
-                    print(f"  {model} seed {seed} attempt {attempt}: {rec['status']}", flush=True)
+                    if any(m in (rec.get("error") or "") for m in OOM_MARKERS):
+                        raise SystemExit(
+                            f"{model} seed {seed}: CUDA out of memory ({rec['experiment_id']}); "
+                            "stopping for a human decision (no batch-size change without an "
+                            "approved amendment)"
+                        )
+                    failures += 1
+                    print(f"  {model} seed {seed}: {rec['status']} ({failures} failure(s))")
+                if failures >= 2:
+                    print(f"  {model} seed {seed}: failed twice; recorded, moving on", flush=True)
+
+    def _mark_interrupted(self) -> None:
+        """Attempts left ``in_progress`` by a dead driver become ``interrupted``."""
+        from visionbench.core.process import process_is
+
+        for r in self.data["runs"]:
+            if r["status"] != "in_progress":
+                continue
+            log = Path(r["log"])
+            m = (
+                EXP_RE.search(log.read_text(encoding="utf-8", errors="replace"))
+                if log.is_file()
+                else None
+            )
+            r["experiment_id"] = m.group(1) if m else None
+            if r["experiment_id"]:
+                with self.store() as es:
+                    exp = es.get(r["experiment_id"])
+                    if process_is(exp.get("runner_pid"), exp.get("runner_create_time")):
+                        raise SystemExit(
+                            f"{r['experiment_id']} is still being trained; not resuming"
+                        )
+                    if exp["status"] in ("pending", "running"):
+                        es.transition(
+                            r["experiment_id"],
+                            "failed",
+                            error="interrupted: benchmark session ended (infrastructure)",
+                        )
+                    r["experiment_status"] = es.get(r["experiment_id"])["status"]
+            r["status"] = "interrupted"
+            r["interruption"] = INTERRUPTED
+            r["detected_at"] = now()
+            print(f"marked interrupted: {r['model']} seed {r['seed']} ({r['experiment_id']})")
+        self.save()
 
     def _train_one(
         self, model: str, yaml_path: Path, seed: int, attempt: int, hashes: dict[str, str]
     ) -> dict[str, Any]:
+        log = self.logs / f"train_{model}_seed{seed}_attempt{attempt}.log"
         rec: dict[str, Any] = {
             "model": model,
             "config": yaml_path.name,
             "config_sha256": hashes[yaml_path.name],
             "seed": seed,
             "attempt": attempt,
+            "status": "in_progress",
             "started_at": now(),
+            "log": str(log),
         }
+        self.data["runs"].append(rec)
+        self.save()
         print(f"[{rec['started_at']}] train {model} seed {seed} (attempt {attempt})", flush=True)
-        log = self.logs / f"train_{model}_seed{seed}_attempt{attempt}.log"
         code, out = self.cli(["train", "--config", str(yaml_path), "--seed", str(seed)], log)
         rec["finished_at"] = now()
         m = EXP_RE.search(out)
@@ -152,12 +232,16 @@ class Benchmark:
             rec["status"] = exp["status"]
             rec["error"] = exp["error"]
         else:
-            rec["status"], rec["error"] = "failed", f"exit code {code}; no experiment created"
+            rec["status"] = "failed"
+            rec["error"] = f"exit code {code}; no experiment created: {out[-500:]}"
         rec["exit_code"] = code
-        self.data["runs"].append(rec)
         self.save()
         print(f"  -> {rec['experiment_id']} {rec['status']}", flush=True)
         return rec
+
+    def annotate(self, index: int, text: str) -> None:
+        self.data["runs"][index]["interruption_detail"] = text
+        self.save()
 
     def evaluate_val(self) -> None:
         for (model, seed), r in sorted(self.final_runs().items()):
@@ -308,12 +392,22 @@ class Benchmark:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("command", choices=["train", "evaluate-val", "latency", "check", "summary"])
+    ap.add_argument(
+        "command", choices=["train", "evaluate-val", "latency", "check", "summary", "annotate"]
+    )
     ap.add_argument("protocol_dir", type=Path)
+    ap.add_argument("--only", help="train: comma-separated model names")
+    ap.add_argument("--index", type=int, help="annotate: runs.json entry index")
+    ap.add_argument("--text", help="annotate: known cause of an interruption")
     args = ap.parse_args()
     bench = Benchmark(args.protocol_dir)
+    if args.command == "train":
+        bench.train(args.only.split(",") if args.only else None)
+        return 0
+    if args.command == "annotate":
+        bench.annotate(args.index, args.text)
+        return 0
     {
-        "train": bench.train,
         "evaluate-val": bench.evaluate_val,
         "latency": bench.latency,
         "check": bench.check,
