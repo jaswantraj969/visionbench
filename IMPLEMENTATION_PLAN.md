@@ -24,15 +24,16 @@ done only when every acceptance criterion has been demonstrated by commands exec
 - Run record: config, seed report, env info, manifest hash, per-epoch metrics.
 - Tests: tiny synthetic dataset trains end-to-end on CPU; same seed → same metrics on same machine.
 
-## M3 — Evaluation & comparison (implemented; pending review)
-- Test-split evaluation of the val-selected checkpoint; every test evaluation recorded and counted (reruns allowed but visible): accuracy, macro-F1, per-class precision/recall, confusion matrix, calibration (ECE), bootstrap CIs.
+## M3 — Evaluation & comparison (done; follow-ups in M4 step 0)
+- Test-split evaluation of the val-selected checkpoint; every test evaluation recorded and counted: accuracy, macro-F1, per-class precision/recall, confusion matrix, calibration (ECE), bootstrap CIs.
 - Comparison report across runs, including the majority baseline; results stored as JSON.
 
-## M4 — API, job runner, uploads
-- FastAPI endpoints for datasets, runs, evaluations over the library.
-- Single-worker job runner: SQLite job table, queued/running/succeeded/failed/cancelled states, cancellation, jobs found `running` at startup marked `failed`.
-- Secure uploads: size limit (`max_upload_mb`), archive path-traversal and bomb protection, content-type sniffing.
-- Tests for job lifecycle, cancel, crash recovery, upload rejection cases.
+## M4 — API, job runner, uploads (implemented; pending review)
+- Step 0: split-independent latency; `compare --eval-ids/--latency-device`; repeated test evaluation requires `--force --reason`; val selection-bias note; baseline `--checkpoint last` is an error.
+- FastAPI endpoints for datasets, uploads, splits, experiments, evaluations, latency, comparisons, jobs over the library; no ML work inside a request.
+- Single-worker job runner: SQLite job table (queued/running/completed/failed/cancelled), atomic claim, child process per job, heartbeat, progress, cooperative cancel + terminate timeout, startup recovery of interrupted jobs and orphaned experiments.
+- Secure uploads: streamed byte limit, magic check, member-name/symlink/encryption/collision/bomb/layout rules, safe extraction, cleanup in every path; `import_root` confinement.
+- Tests for job lifecycle, cancel, hard kill + recovery, every upload rejection rule, image traversal, path hygiene.
 
 ## M5 — Grad-CAM
 - Grad-CAM for CNN models in the registry (target layer per architecture), overlays saved as artifacts; sanity check (map changes when weights are randomized).

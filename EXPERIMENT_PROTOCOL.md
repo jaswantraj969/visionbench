@@ -151,14 +151,28 @@ Limits:
   `--split test` opens no train or val image.
 - The checkpoint reported on test is the **val-selected** `best.pt` by default. `last.pt` is
   evaluated only with `--checkpoint last`, and the result is recorded as `checkpoint: last`.
-- **Test-use accounting:** every evaluation is a row in the `evaluations` table. Re-evaluating the
-  same experiment and checkpoint on test is allowed, because development needs reruns, but it
-  prints a warning with the count of previous test evaluations. The counts appear in every
-  `metrics.json` (`test_use`) and in every comparison report (`test evaluations so far` column,
-  plus a `repeated_test_evaluation` confound flag). Nothing is blocked, and nothing is hidden.
+- **Test-use accounting:** every evaluation is a row in the `evaluations` table. The counts
+  appear in every `metrics.json` (`test_use`) and in every comparison report (`test evaluations
+  so far` column, plus a `repeated_test_evaluation` confound flag).
+- **Forced test re-evaluation (since M4).** The first test evaluation of an experiment +
+  checkpoint is free. A **second or later one is refused** unless it is explicitly forced with
+  a non-empty reason (`--force --reason "..."` on the CLI, `"force": true, "reason": "..."` in
+  the API). `force` without a reason is an error. The rule is one function
+  (`evaluation.data.check_test_reuse`), called by the CLI, by the API before queueing (409
+  `test_reevaluation_requires_force`), and again inside the job. A forced evaluation records
+  `forced=true` and the reason in the `evaluations` row and in `metrics.json`
+  (`test_use.forced`, `test_use.reason`); comparison reports list the reasons per
+  experiment and raise a `forced_test_reevaluation` confound flag. Legitimate reasons are
+  bug fixes in evaluation code, not "trying again". Val evaluations are never restricted.
+- **Pinned evaluations.** `compare --eval-ids ...` (API: `eval_ids`) pins exactly which
+  recorded evaluation is used per experiment, so a report can be reproduced after later
+  evaluations exist; otherwise the latest one is used. Pinned ids are listed in the report.
 - **Ranking uses validation only.** `compare` ranks models by validation balanced accuracy at the
   val-selected epoch, using competition ranks with ties marked `=`. Test metrics are reported for
   every model, with CIs and paired differences, **without a winner label**.
+- **Validation comparisons are selection-biased.** A comparison on `--split val` states that
+  the same validation data chose each model's checkpoint, so val metrics overestimate
+  performance on new data (`selection_bias_note` in JSON, a note in Markdown).
 
 ## 7. Preprocessing (implemented, M2)
 - **Pretrained weights:** use the weights' own transform. ResNet18: resize 256 (bilinear), then
@@ -255,15 +269,25 @@ where a metric is undefined are excluded and counted (`resamples_defined`). The 
 using the **same resampled indices** for both models. The reference is the majority baseline if
 present, otherwise the first experiment, or `--reference`.
 
-**Latency** (`evaluation/efficiency.py`):
+**Latency** (`evaluation/efficiency.py` timing, `evaluation/latency.py` since M4):
+- **Independent of splits (since M4).** Latency is its own operation (`visionbench latency
+  <exp> --device cpu|cuda`, `POST /api/experiments/{id}/latency`). It loads the verified
+  checkpoint and times random input; it reads **no split and no image**, so measuring
+  latency never counts as a use of val or test. `evaluate` no longer measures latency.
 - Measures the **model forward pass only**; preprocessing, decoding and data loading are excluded.
 - Uses random input at the model's input size, `torch.inference_mode`, eval mode, 10 warmup
-  iterations, then 50 timed iterations with `torch.cuda.synchronize` before and after each on CUDA.
+  iterations, then 50 timed iterations with `torch.cuda.synchronize` before and after each on CUDA
+  (both configurable).
 - Batch sizes are 1 and 32. Reported: median and p95 ms, plus device, GPU or CPU name, torch
-  threads and input size.
-- A latency number is valid only for the device it was measured on. Comparisons flag mixed
-  devices.
-- The majority baseline reports latency as not applicable (`null` + reason).
+  threads and input size. Each measurement is one device, stored as
+  `experiments/<exp>/latency/<lat_id>/latency.json` and a `latency_measurements` row.
+- A latency number is valid only for the device it was measured on. `compare
+  --latency-device cpu|cuda` reports, for every model, the latest measurement on that one
+  device (or "no latency measured on <device>"; without `--latency-device` no latency is
+  reported), so a report never mixes devices; `latency_devices_differ` remains as a guard
+  flag.
+- The majority baseline has no forward pass: latency is not applicable (`null` + reason) and
+  requesting it is an error.
 - Efficiency also records parameter counts (total/trainable, from training), `best.pt` size in
   bytes, and training seconds.
 
@@ -276,13 +300,14 @@ present, otherwise the first experiment, or `--reference`.
 - `single_seed_per_model` (seed variance unmeasured)
 - `class_weighting_differs`
 - `latency_devices_differ`
+- `forced_test_reevaluation` (with the recorded reasons)
 - `repeated_test_evaluation` (with per-experiment test counts)
 
 `compare` refuses experiments with different dataset fingerprints or split_ids; there is no
 override.
 
 ## 11. Synthetic sanity checks are not benchmarks
-The M2 and M3 demos use a generated shapes dataset to show that the pipeline works end to end. Their numbers are
+The M2, M3 and M4 demos use a generated shapes dataset to show that the pipeline works end to end. Their numbers are
 **pipeline sanity checks on synthetic data, not benchmark results**, and must never be cited as
 model performance.
 

@@ -1,5 +1,46 @@
 # Changelog
 
+## Unreleased: M4 FastAPI backend, single-worker job runner, secure upload (2026-10-27)
+
+### Added
+- `visionbench.jobs`:
+  - `store`: `jobs` table; atomic enqueue with a queue limit (`QueueFullError` → 429) and
+    atomic claim (`UPDATE ... RETURNING`); cancel, heartbeat, progress, result.
+  - `params`: strict per-kind parameter models.
+  - `handlers`: dataset import/split/verify, train (progress per epoch and step), evaluate,
+    latency, each calling the same library functions as the CLI.
+  - `worker`: per-data-root lock, one job at a time in a spawn child, heartbeat, child
+    watchdog (exits when the worker dies), cooperative cancel with terminate-after-timeout,
+    startup recovery of interrupted jobs and orphaned experiments.
+- `visionbench.data.archive`: ZIP validation from the central directory (names, symlinks,
+  encryption, case collisions, member count, total size, compression ratio, layout), safe
+  extraction into a staging dir, upload import with cleanup, `import_root` confinement.
+- `visionbench.api`: 23 operations under `/api` (datasets, uploads, imports, images, splits,
+  verify, experiments, evaluations, latency, comparisons, jobs); streaming multipart upload
+  with byte limit; strict id patterns; error mapping; scrubbed JSON responses (no absolute
+  paths); CORS limited to configured origins.
+- `visionbench.core.redact.scrub_paths`.
+- CLI: `worker` and `serve` (API + one worker; non-loopback hosts refused).
+- Training: step hook (`RunCancelled`) for cooperative cancel; `experiments.runner_pid`.
+- Settings: API host/port, CORS origins, queue limit, worker timings, `import_root`, ZIP
+  limits.
+- Dependency: `python-multipart` (streaming multipart parser).
+
+### Changed (M4 step 0)
+- `visionbench latency <exp> --device cpu|cuda` measures latency without touching any split;
+  `evaluate` no longer measures latency (`--no-latency` removed).
+- `compare --eval-ids` pins evaluations; `compare --latency-device` selects one device.
+- A repeated test evaluation requires `--force --reason`; `forced`/`reason` are stored and
+  reported (`forced_test_reevaluation` flag).
+- Comparisons on val include the selection-bias note.
+- `--checkpoint last` on a majority baseline is an error.
+- Comparison report format version 2; report paths are relative to the data root.
+
+### Database
+- Schema v3: `evaluations.forced`, `evaluations.reason`, `latency_measurements` table.
+- Schema v4: `jobs` table, `experiments.runner_pid`. WAL journal mode and a 30 s busy
+  timeout. Older databases are upgraded in place (additive only).
+
 ## Unreleased: M3 evaluation, test-use accounting, comparison (2026-10-27)
 
 ### Added

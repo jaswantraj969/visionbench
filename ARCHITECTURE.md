@@ -3,7 +3,7 @@
 ## Layering (library-first)
 
 ```
-  FastAPI (visionbench.api)    CLI (visionbench.cli)    Job runner (visionbench.jobs, planned)
+  FastAPI (visionbench.api)    CLI (visionbench.cli)    Job runner (visionbench.jobs)
                  \                    |                      /
                   `----------- visionbench library ---------'
           core · data · models · training · evaluation · explain · robustness · tracking
@@ -22,8 +22,18 @@ contain no ML logic.
 | `core.env_info` | implemented (M0) | Python / torch / torchvision / NumPy / platform / CUDA versions for experiment records |
 | `core.errors` | implemented (M1) | `VisionBenchError` hierarchy, the expected user-facing errors |
 | `core.jsonio` | implemented (M1) | canonical JSON (sorted keys, LF, UTF-8) for byte-identical files |
-| `api.main` | implemented (M0) | `create_app()` factory; `/api/health`, `/api/ready`; uniform error schema |
-| `cli` | implemented (M0–M3) | `env`; `dataset import\|report\|verify\|split\|list`; `train`; `experiments list\|show`; `evaluate`; `compare`; `evaluations list` |
+| `core.redact` | implemented (M4) | `scrub_paths()`: replaces data root / import root / torch home spellings with placeholders |
+| `api.main` | implemented (M0, M4) | `create_app()` factory; CORS; exception handlers; scrubbed JSON responses; routers |
+| `api.routes.*` | implemented (M4) | datasets, experiments, evaluations, comparisons, jobs (see "API layer") |
+| `api.upload` | implemented (M4) | streaming multipart receiver with a byte limit (no spooling) |
+| `api.errors` / `api.deps` / `api.schemas` | implemented (M4) | error mapping, id patterns, enqueue helper, request/response models |
+| `jobs.store` | implemented (M4) | `jobs` table, atomic enqueue (queue limit) and claim, cancel, heartbeat, progress |
+| `jobs.params` | implemented (M4) | strict per-kind parameter models (`extra="forbid"`) |
+| `jobs.handlers` | implemented (M4) | job kind → library call (import, split, verify, train, evaluate, latency) |
+| `jobs.worker` | implemented (M4) | lock, recovery, claim loop, child process, heartbeat, cancel, timeouts |
+| `data.archive` | implemented (M4) | ZIP validation (central directory), safe extraction, upload import, `import_root` confinement |
+| `evaluation.latency` | implemented (M4 step 0) | split-independent latency measurement (`latency_measurements` table) |
+| `cli` | implemented (M0–M4) | `env`; `dataset import\|report\|verify\|split\|list`; `train`; `experiments list\|show`; `evaluate`; `latency`; `compare`; `evaluations list`; `worker`; `serve` |
 | `data.records` | implemented (M1) | `FileRecord`, `Issue`/`IssueCategory`, NFC names, fingerprint |
 | `data.scan` | implemented (M1) | source validation, Pillow decode checks, symlink/junction refusal |
 | `data.hashing` | implemented (M1) | 64-bit dHash, vectorized near-duplicate edge search |
@@ -49,7 +59,6 @@ contain no ML logic.
 | `evaluation.compare` | implemented (M3) | comparison report, VAL-only ranking, confound flags |
 | `explain` | empty | M5: Grad-CAM |
 | `robustness` | empty | M6: corruption benchmarks |
-| `jobs` | empty | M4: single-worker job runner |
 
 ## Data root layout
 
@@ -79,7 +88,11 @@ var/
       checkpoints/                   best.pt/.json, last.pt/.json (or baseline.json)
       evaluations/<eval_id>/         (M3) ev-<YYYYMMDD-HHMMSS>-<6 hex>: metrics.json,
                                      predictions.csv, confusion_matrix.json, efficiency.json
-  db/visionbench.db                  (M2) SQLite experiment store
+      latency/<latency_id>/          (M4) lat-...: latency.json (one device per measurement)
+  db/visionbench.db                  (M2) SQLite experiments + jobs (WAL: also -wal, -shm)
+  db/worker.lock                     (M4) pid of the one worker for this data root
+  tmp/uploads/<upload_id>.zip        (M4) streamed upload, removed after import/rejection
+  tmp/staging-<upload_id>/           (M4) extraction staging, always removed
   cache/torch/checkpoints/           (M2) torchvision weights (default torch hub dir;
                                      VISIONBENCH_TORCH_HOME overrides)
   cache/norm_stats/<dataset_id>/<split_id>/norm_stats_train_<N>px.json
@@ -111,9 +124,10 @@ staging + rename pattern. If that split already exists, it only verifies it byte
 
 Notes:
 - The scan temporarily sets Pillow's module-level `MAX_IMAGE_PIXELS` and
-  `LOAD_TRUNCATED_IMAGES`, so scanning is **not thread-safe**. The planned M4 job runner is
-  single-worker.
-- `dataset.json.source_path` is local CLI metadata. The M4 API must not expose it.
+  `LOAD_TRUNCATED_IMAGES`, so scanning is **not thread-safe**. The M4 job runner is
+  single-worker and runs each job in its own process.
+- `dataset.json.source_path` is local metadata. The API never returns it (uploads record
+  `upload:<filename>`, path imports `import_root:<relpath>`).
 - The snapshot is "immutable" because it is never overwritten and its hashes are recorded. Files
   are not made read-only. `dataset verify [--full]` (M2) detects missing, resized, unrecorded and
   (with `--full`) altered files.
@@ -152,26 +166,33 @@ Notes:
 The majority baseline uses the same path but needs only labels. It fits train priors, scores the
 val labels, and writes `checkpoints/baseline.json`. It opens no images.
 
-### Database schema (`db/visionbench.db`, schema version 2)
+### Database schema (`db/visionbench.db`, schema version 4)
 
 | Table | Columns |
 |---|---|
 | `schema_version` | `version` (PK), `applied_at` |
-| `experiments` | `id` (PK), `created_at`, `started_at`, `finished_at`, `status`, `error`, `dataset_id`, `split_id`, `dataset_fingerprint`, `model`, `weights_source`, `weights_enum`, `weights_sha256`, `config_json`, `env_json`, `seed`, `best_epoch`, `best_metric`, `train_seconds`, `run_dir` |
+| `experiments` | `id` (PK), `created_at`, `started_at`, `finished_at`, `status`, `error`, `dataset_id`, `split_id`, `dataset_fingerprint`, `model`, `weights_source`, `weights_enum`, `weights_sha256`, `config_json`, `env_json`, `seed`, `best_epoch`, `best_metric`, `train_seconds`, `run_dir`, `runner_pid` (v4) |
 | `epoch_metrics` | `id`, `experiment_id` (FK), `epoch`, `train_loss`, `val_loss`, `val_accuracy`, `val_balanced_accuracy`, `lr`, `epoch_seconds`, `steps` |
 | `artifacts` | `id`, `experiment_id` (FK), `kind`, `relpath` (relative to data root), `sha256`, `size_bytes`, `created_at` |
-| `evaluations` (M3) | `id` (PK), `experiment_id` (FK), `split` (`val`\|`test`), `checkpoint` (`best`\|`last`\|`baseline`), `created_at`, `metrics_path`, `predictions_sha256`, `visionbench_version` |
+| `evaluations` (M3) | `id` (PK), `experiment_id` (FK), `split` (`val`\|`test`), `checkpoint` (`best`\|`last`\|`baseline`), `created_at`, `metrics_path`, `predictions_sha256`, `visionbench_version`, `forced`, `reason` (v3) |
+| `latency_measurements` (v3) | `id` (PK), `experiment_id` (FK), `checkpoint`, `device`, `device_name`, `torch_threads`, `input_size`, `warmup`, `iterations`, `results_json`, `path`, `created_at`, `visionbench_version` |
+| `jobs` (v4) | `id` (PK), `kind`, `status`, `params_json`, `result_json`, `error`, `progress_json`, `cancel_requested`, `worker_pid`, `child_pid`, `heartbeat_at`, `created_at`, `started_at`, `finished_at` |
 
-- Tables are created with `create_all`. The only upgrade is the additive v1 → v2 (new
-  `evaluations` table), which was applied automatically to the M2 demo database. Any other
-  stored version is an error, since there are no migrations (Alembic) yet.
+- Upgrades are additive only: `create_all` adds missing tables, and a fixed list of missing
+  columns is added with `ALTER TABLE ... ADD COLUMN` (v3: `evaluations.forced/reason`; v4:
+  `experiments.runner_pid`). v1 → v2 → v3 → v4 databases upgrade in place (tested). A stored
+  version newer than the code is an error; there are no migrations (Alembic) yet.
+- Every connection sets `PRAGMA busy_timeout=30000`. `journal_mode=WAL` is set once when the
+  engine is opened (retried, because a database whose last writer was hard-killed can briefly
+  report `disk I/O error`). WAL lets the API read while the worker child writes.
 - Listings are ordered by `created_at` and then SQLite insertion order (`rowid`). Timestamps
   have 1-second resolution, and `compare` relies on "latest evaluation" being well defined.
 - Allowed status transitions: `pending → running | failed | cancelled` and
   `running → completed | failed | cancelled`. Anything else raises.
 - Rows are never left `running` by a process that exits through Python. A hard kill (power loss,
-  `taskkill /F`) can still leave a `running` row, and M4's startup recovery must mark those
-  `failed`.
+  `taskkill /F`) can still leave a `running` row; the worker's startup recovery (below) marks
+  those `failed` with `interrupted: ...`. A user stop inside the API worker (cancel) ends as
+  `cancelled` with the partial history kept.
 
 ## Evaluation (M3)
 
@@ -190,26 +211,140 @@ val labels, and writes `checkpoints/baseline.json`. It opens no images.
 4. Predictions run in manifest relpath order through `evaluation.data.build_eval_dataloader`
    (`select_eval_entries` + the shared `load_image` choke point). The majority baseline uses
    labels only and opens no images.
-5. Metrics, bootstrap CIs and efficiency (latency on the evaluation device) are computed. The
-   four output files are written and registered as artifacts, and an `evaluations` row is
-   inserted.
+5. Metrics, bootstrap CIs and efficiency (params, checkpoint size, training time) are
+   computed. The four output files are written and registered as artifacts, and an
+   `evaluations` row is inserted. Since M4 step 0 evaluation does **not** measure latency.
 
-`visionbench compare <exp> <exp> ... --split val|test` reads the latest recorded evaluation of
-each experiment's val-selected checkpoint. It never evaluates implicitly. It verifies each
-predictions file against its recorded sha256, requires identical samples and labels, and
-writes `reports/<report_id>/comparison.{json,md}`.
+A repeated test evaluation of the same experiment + checkpoint is refused unless
+`force=True` with a non-empty `reason` (`check_test_reuse`, used by both CLI and API); the
+row records `forced` and `reason`.
+
+`visionbench latency <exp> --device cpu|cuda` (`evaluation.latency`) measures forward-pass
+latency on random input at the model's input size. It verifies the checkpoint (sha256 vs its
+artifact row) but reads **no split and no image**. Results go to
+`experiments/<exp>/latency/<lat_id>/latency.json` and a `latency_measurements` row.
+
+`visionbench compare <exp> <exp> ... --split val|test [--eval-ids ...] [--latency-device D]`
+reads the latest recorded evaluation of each experiment's val-selected checkpoint, or the
+pinned `--eval-ids`. It never evaluates implicitly. It verifies each predictions file against
+its recorded sha256, requires identical samples and labels, takes latency from the latest
+measurement on the chosen device, and writes `reports/<report_id>/comparison.{json,md}`.
+Comparisons on val state the selection-bias note.
 
 ## Error schema
 
 Every API error response: `{"error": {"code": "<machine code>", "message": "<human text>"}}`.
 Unhandled exceptions return `500 internal_error` without leaking exception details.
 
-## Planned job-runner design (M4, not implemented)
+## API layer (M4)
 
-- One worker process executes jobs serially; the API process only enqueues and reads status.
-- Jobs are rows in a SQLite table (`id, kind, params JSON, state, created/started/finished, error, cancel_requested`).
-- Cancellation is cooperative: the worker checks `cancel_requested` between steps (e.g. per batch/epoch).
-- On worker startup, any job still in `running` state is marked `failed` with reason "interrupted" (crash recovery); jobs are not auto-resumed.
+`create_app(settings)` builds the app; `visionbench serve` runs it with uvicorn on
+`127.0.0.1` (non-loopback hosts are refused: there is **no authentication**).
+
+- **No ML work in a request.** Every endpoint that imports, splits, verifies, trains,
+  evaluates or measures latency validates its input, runs cheap pre-checks (dataset/split/
+  experiment exists, experiment completed, test-reuse rule, baseline-has-no-latency), and
+  enqueues a job: `202 {"job": {...}}`. The only synchronous computation is
+  `POST /api/comparisons`, which reads recorded predictions (no model is loaded).
+- **Ids** are validated with strict patterns (`ds-[0-9a-f]{12}`, `sp-...`, `exp-YYYYMMDD-
+  HHMMSS-[0-9a-f]{6}`, `ev-`, `rp-`, `job-`); a mismatch is `422 validation_error` before
+  any filesystem access.
+- **Errors** map library exceptions to codes (`api.errors.map_exception`): not found → 404,
+  `RepeatedTestEvaluationError` → `409 test_reevaluation_requires_force`, `QueueFullError`
+  → `429 queue_full`, archive rejections → `422 archive_<code>`, path-import refusals →
+  403, validation → 422, unexpected → `500 internal_error` (no details).
+- **Path hygiene.** Responses never contain absolute paths: records store paths relative to
+  the data root, `source_path` is not returned, job errors are scrubbed by the worker, and
+  the default response class (`ScrubbedJSONResponse`) replaces any spelling of the data root,
+  import root or torch home with `<data_root>` / `<import_root>` / `<torch_home>` as a last
+  line of defence. Process ids are not returned either.
+- **CORS** allows only `VISIONBENCH_CORS_ORIGINS` (default the Vite dev server on
+  `localhost:5173` / `127.0.0.1:5173`), methods GET/POST.
+- **Image endpoint** `GET /api/datasets/{id}/images?relpath=...` treats `relpath` as a key
+  into the dataset's `files.json` records; it never joins user input onto a path. The file
+  served is built from the stored record, resolved, and must lie inside `raw/`. Anything
+  else (traversal, encoded traversal, absolute paths, unrecorded files) is
+  `404 image_not_found`.
+
+## Job lifecycle and worker (M4)
+
+```
+             POST (202)            claim (atomic)          child outcome
+  client ──► queued ───────────► running ───────────────► completed | failed | cancelled
+               │ cancel              │ cancel → cancel_requested
+               ▼                     │   (child stops cooperatively, or is terminated
+           cancelled                 │    after cancel_timeout → cancelled + note)
+     "cancelled before start"        │ worker/child dies → (next worker start) failed
+                                     ▼                     "interrupted: ..."
+```
+
+- **Enqueue** is one `INSERT ... SELECT ... WHERE (queued count) < :limit`, so the queue
+  limit (`VISIONBENCH_MAX_QUEUED_JOBS`, default 10) holds under concurrent requests.
+- **One worker per data root**: `db/worker.lock` is created with `O_EXCL` and holds the
+  worker pid; a lock whose pid is dead is taken over, a live one makes a second worker exit.
+- **Claim** is `UPDATE jobs SET status='running' ... WHERE id = (oldest queued) AND status=
+  'queued' RETURNING id`, a single atomic statement. The worker runs one job at a time.
+- **Child process.** Each job runs in a fresh `multiprocessing` *spawn* child calling the same
+  library functions as the CLI (`execute_job` → `jobs.handlers`). The worker polls the child,
+  writes `heartbeat_at` every `worker_heartbeat_seconds` (2 s), and watches
+  `cancel_requested`. The child runs a watchdog thread that calls `os._exit` as soon as the
+  worker pid is gone, so killing the worker never leaves training running.
+- **Progress.** Training updates `progress_json` after every epoch (epoch, latest metrics)
+  and, throttled to 0.5 s, the step counter; the API returns it with the job.
+- **Cancel.** `POST /api/jobs/{id}/cancel`: a queued job is cancelled at once (a queued
+  upload's file is deleted); a running job gets `cancel_requested`. Training checks the flag
+  in its step hook, raises `RunCancelled`, marks the experiment `cancelled` (history and
+  checkpoints kept) and the job `cancelled by request`. If the child has not stopped
+  `cancel_timeout_seconds` (30 s) after the request, it is terminated and the job and
+  experiment are marked cancelled with a note.
+- **Recovery** runs when a worker starts (under the lock):
+  1. every `running` job whose worker pid is dead or whose heartbeat is older than
+     `heartbeat_stale_seconds` (30 s): terminate its child if still alive, mark its
+     experiment `failed` first, delete its upload temp files, then mark the job `failed`
+     with `interrupted: <reasons>`;
+  2. every `pending`/`running` experiment whose `runner_pid` is not alive (e.g. a CLI
+     `train` that was killed) → `failed` with `interrupted: no live process ...`.
+
+  Jobs are never resumed automatically. Each recovery is logged as a WARNING.
+- `visionbench serve` starts the API and **one** `visionbench worker` subprocess.
+  `visionbench worker` can also be run alone (e.g. with `serve --no-worker`).
+
+## Upload pipeline and limits (M4)
+
+`POST /api/datasets/uploads` (multipart: `file`, `name`):
+
+1. **Receive.** Only `multipart/form-data` (else 415). A `Content-Length` larger than the
+   limit is rejected before reading; the body is then parsed in a streaming way
+   (`python-multipart`) and the file part is written to `tmp/uploads/<upload_id>.zip`
+   (opened with `"xb"`) while counting bytes. Exceeding `VISIONBENCH_MAX_UPLOAD_MB`
+   (default 200) aborts with `413 upload_too_large`. Starlette's `UploadFile` is not used
+   because it spools the whole body first.
+2. **Validate** (synchronously, central directory only; no member is decompressed):
+   - magic bytes `PK\x03\x04` (`PK\x05\x06` → `archive_empty_archive`, anything else →
+     `archive_not_a_zip`), readable central directory (else `archive_corrupt_zip`);
+   - member names checked on the raw stored name: NUL/control characters, `<>:"|?*`, empty
+     or `.` components, backslashes, UNC, absolute paths, drive letters, `..`, trailing
+     dots/spaces, Windows reserved names (`CON`, `NUL`, `COM1`, ...);
+   - symlinks (Unix mode in `external_attr`) and encrypted members are rejected;
+   - duplicate names after NFC + casefold (`case_collision`);
+   - at most `VISIONBENCH_ZIP_MAX_MEMBERS` (50 000) members, total uncompressed size at most
+     `VISIONBENCH_ZIP_MAX_UNCOMPRESSED_MB` (4096), compression ratio at most
+     `VISIONBENCH_ZIP_MAX_RATIO` (100) for each member of at least 1 MiB and for the whole
+     archive once it is at least 1 MiB;
+   - layout: class folders at the root, or one top folder containing them (`__MACOSX/` is
+     ignored); anything else is `422 archive_bad_layout`.
+   Any rejection deletes the upload and returns `422 archive_<code>` naming the member.
+3. **Queue** a `dataset_import` job (429 if the queue is full; the upload is deleted).
+4. **Import** (in the worker): extract into `tmp/staging-<upload_id>/`, creating each file
+   with `"xb"` after checking the resolved path is inside the staging dir, and counting the
+   bytes actually written against the declared size and the total limit. The staging folder
+   is then imported with the normal dataset import (all M1 validation applies). The upload
+   and staging folder are deleted in a `finally`, by recovery if the child was killed, and
+   by cancel if the job never started.
+
+**Path imports** (`POST /api/datasets/imports`) are disabled unless `VISIONBENCH_IMPORT_ROOT`
+is set (403 `path_import_disabled`); the resolved path must be a directory inside the
+import root (403 `path_outside_import_root`). Only the relative path is stored.
 
 ## Model-loading policy
 
