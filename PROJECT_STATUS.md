@@ -1,6 +1,6 @@
 # Project Status
 
-_Last updated: 2026-10-27, end of M4 (pending supervisor review)._
+_Last updated: 2026-10-27, end of M4.1 (process-safety and local-API hardening; pending supervisor review)._
 
 ## Current state
 - **M0:** foundation (config, seeding, env info, health/ready API).
@@ -34,27 +34,44 @@ _Last updated: 2026-10-27, end of M4 (pending supervisor review)._
   - 23 API operations under `/api`, strict id patterns, uniform errors, scrubbed responses,
     CORS restricted to configured origins;
   - `visionbench worker` and `visionbench serve` (loopback only).
+- **M4.1** (fixes from the M4 review, no new features):
+  - processes are identified by (pid, creation time) via psutil (schema v5 stores creation
+    times); nothing is terminated or treated as alive by pid alone;
+  - the worker lock is an exclusive OS lock (`msvcrt.locking` / `fcntl.flock`), not a pid
+    file;
+  - recovery runs under that lock and fails every `running` job unconditionally; orphaned
+    experiments are kept only while their runner's identity is alive;
+  - the API rejects foreign `Host` headers (400), and POST/PUT/PATCH/DELETE without
+    `X-VisionBench-Request: 1` (403) or with a foreign `Origin` (403); `nosniff` on every
+    response.
 - There is no authentication, Grad-CAM, robustness suite, or frontend.
 
 ## Verified in session (2026-10-27, Windows 11, Python 3.11.15, torch 2.14.1+cu130, RTX 3050 6GB)
 - `ruff check .` and `ruff format --check .` pass.
-- `pytest -q --cov=visionbench`: 242 passed and 1 skipped (file symlink), coverage 91%. The same
-  holds with `CUDA_VISIBLE_DEVICES=-1` (in-process `torch.cuda.is_available()=False`).
-  `jobs/worker.py` reports 51% because most of it runs in worker subprocesses, which coverage
-  does not measure; those paths are exercised by the real-worker tests.
-- Real-worker tests: one job at a time, progress, cooperative cancel, hard kill of the worker
-  + recovery (0 failures in 10 repeated runs after the WAL/ordering fixes), API health while
-  training (max 12.7 ms normal run / 19.8 ms GPU-hidden run, final runs at `3c1955e`).
+- `pytest -q --cov=visionbench` (M4.1): 270 passed and 1 skipped (file symlink) in 369.49 s, coverage 94%. With
+  `CUDA_VISIBLE_DEVICES=-1`: 270 passed and 1 skipped in 354.62 s (in-process `torch.cuda.is_available()=False`).
+  Coverage now includes the worker subprocesses and their spawn children: `jobs/worker.py`
+  87% (was 51% in M4).
+- Real-worker tests: one job at a time, progress, cooperative cancel, terminate-after-timeout
+  for latency and training jobs, hard kill of the worker + immediate recovery, second worker
+  fails fast on the OS lock, API health while training (max 22.4 ms normal run /
+  15.7 ms GPU-hidden run).
+- Every M4.1 defect scenario was run against the pre-fix code (`bcd6674`) and reproduced there
+  (REVIEW_PACKET.md §6).
 - Every upload rejection rule has a test; image endpoint traversal cases return 404; a full
   API flow test asserts that no response body contains the absolute data root.
 - **Live demo with `visionbench serve`** (pipeline demo on synthetic data, not benchmark
   results): upload → split → CUDA training with live progress → val evaluations → CPU and
   CUDA latency → val comparison → test-use 409/422 → cancel → hard kill + recovery. 550
-  responses, none containing the absolute data root. See REVIEW_PACKET.md.
+  responses, none containing the absolute data root (M4 packet, commit `bcd6674`).
+- M4.1 demos (REVIEW_PACKET.md): hard kill + `serve` restart 0.4 s later → recovery logged
+  0.08 s after the new worker started; curl.exe 403/403/400/2xx; pid-reuse child survives a
+  real `visionbench worker` recovery.
 
 ## Not verified
 - The CI workflow has never run. The file-symlink test is skipped on this machine.
-- Linux/macOS process handling (`pid_alive`/terminate have POSIX branches that were not run).
+- Linux/macOS process handling: psutil and the `fcntl.flock` branch of the worker lock were
+  not run on POSIX.
 - Concurrency beyond one API process + one worker; very large uploads (limits are tested with
   small values).
 - Real (non-synthetic) datasets; Python 3.12/3.13.

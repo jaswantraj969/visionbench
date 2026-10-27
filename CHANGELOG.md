@@ -1,5 +1,52 @@
 # Changelog
 
+## Unreleased: M4.1 process-safety and local-API security hardening (2026-10-27)
+
+### Fixed
+- **H1** Recovery could terminate an unrelated process whose pid reused a recorded child
+  pid. Processes are now identified by (pid, creation time) (`visionbench.core.process`,
+  psutil). Every terminate checks that identity first, and nothing is ever killed by pid alone.
+- **H2** Web pages in the user's browser could send state-changing requests to the local API
+  (cross-site multipart upload, body-less cancel) and, via DNS rebinding, read responses.
+  New `visionbench.api.security.LocalRequestGuard`:
+  - `Host` must be `localhost`/`127.0.0.1`/`[::1]` (+ `VISIONBENCH_EXTRA_TRUSTED_HOSTS`),
+    otherwise `400 invalid_host`;
+  - POST/PUT/PATCH/DELETE need `X-VisionBench-Request: 1`, otherwise
+    `403 missing_client_header`;
+  - an `Origin` not in the CORS origins gets `403 origin_not_allowed`;
+  - `X-Content-Type-Options: nosniff` on every response.
+- **M1** The worker lock and recovery relied on pid liveness:
+  - the pid-file lock is now an exclusive OS lock (`msvcrt.locking` / `fcntl.flock`) held for
+    the worker's lifetime; the file content is informational;
+  - `recover()` runs only under that lock and fails every `running` job unconditionally;
+  - orphaned experiments are kept only if their runner's (pid, creation time) is alive.
+
+### Changed
+- `recover(settings, lock)` requires the held `WorkerLock`, and its `interrupted:` messages
+  changed (`worker <pid> is gone; child process <pid> not running`, `runner process <pid>
+  not running`).
+- `JobStore.claim(pid, create_time)`, `JobStore.set_child(job, pid, create_time)`, and
+  `ExperimentStore.create(..., runner=(pid, create_time))` (the runner is recorded in the same
+  transaction).
+- The child watchdog compares the worker's identity, not just its pid.
+- CORS `allow_headers` includes `x-visionbench-request`.
+- Removed the `VISIONBENCH_HEARTBEAT_STALE_SECONDS` setting (recovery no longer uses heartbeat
+  age).
+- Coverage now measures `visionbench worker` subprocesses and their spawn children
+  (`patch = ["subprocess", "_exit"]`, `concurrency = ["thread", "multiprocessing"]`). Real-worker
+  tests let the worker exit by itself (`--max-jobs`) so that its data is saved.
+
+### Added
+- Dependency: `psutil` (process creation times; replaces the ctypes Win32 helpers).
+- Test-only hook `VISIONBENCH_TEST_IGNORE_COOPERATIVE_CANCEL=1`, which makes a job ignore
+  cooperative cancel so that the training terminate-after-timeout path can be tested.
+- Tests: `tests/jobs/test_recovery.py`, `tests/api/test_api_security.py`, the training
+  cancel-timeout test and the real-process lock test in `tests/jobs/test_worker_process.py`.
+
+### Database
+- Schema v5: `jobs.worker_create_time`, `jobs.child_create_time`,
+  `experiments.runner_create_time`. Upgraded in place (additive).
+
 ## Unreleased: M4 FastAPI backend, single-worker job runner, secure upload (2026-10-27)
 
 ### Added

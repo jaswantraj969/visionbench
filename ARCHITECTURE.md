@@ -24,13 +24,15 @@ contain no ML logic.
 | `core.jsonio` | implemented (M1) | canonical JSON (sorted keys, LF, UTF-8) for byte-identical files |
 | `core.redact` | implemented (M4) | `scrub_paths()`: replaces data root / import root / torch home spellings with placeholders |
 | `api.main` | implemented (M0, M4) | `create_app()` factory; CORS; exception handlers; scrubbed JSON responses; routers |
+| `api.security` | implemented (M4.1) | Host allow-list, client header + Origin check on unsafe methods, `nosniff` |
+| `core.process` | implemented (M4.1) | process identity (pid + creation time, psutil); identity-checked terminate |
 | `api.routes.*` | implemented (M4) | datasets, experiments, evaluations, comparisons, jobs (see "API layer") |
 | `api.upload` | implemented (M4) | streaming multipart receiver with a byte limit (no spooling) |
 | `api.errors` / `api.deps` / `api.schemas` | implemented (M4) | error mapping, id patterns, enqueue helper, request/response models |
 | `jobs.store` | implemented (M4) | `jobs` table, atomic enqueue (queue limit) and claim, cancel, heartbeat, progress |
 | `jobs.params` | implemented (M4) | strict per-kind parameter models (`extra="forbid"`) |
 | `jobs.handlers` | implemented (M4) | job kind → library call (import, split, verify, train, evaluate, latency) |
-| `jobs.worker` | implemented (M4) | lock, recovery, claim loop, child process, heartbeat, cancel, timeouts |
+| `jobs.worker` | implemented (M4, M4.1) | OS lock, recovery, claim loop, child process, heartbeat, cancel, timeouts |
 | `data.archive` | implemented (M4) | ZIP validation (central directory), safe extraction, upload import, `import_root` confinement |
 | `evaluation.latency` | implemented (M4 step 0) | split-independent latency measurement (`latency_measurements` table) |
 | `cli` | implemented (M0–M4) | `env`; `dataset import\|report\|verify\|split\|list`; `train`; `experiments list\|show`; `evaluate`; `latency`; `compare`; `evaluations list`; `worker`; `serve` |
@@ -90,7 +92,8 @@ var/
                                      predictions.csv, confusion_matrix.json, efficiency.json
       latency/<latency_id>/          (M4) lat-...: latency.json (one device per measurement)
   db/visionbench.db                  (M2) SQLite experiments + jobs (WAL: also -wal, -shm)
-  db/worker.lock                     (M4) pid of the one worker for this data root
+  db/worker.lock                     (M4.1) OS-locked while a worker runs; content (pid, creation
+                                     time of the last holder) is informational only
   tmp/uploads/<upload_id>.zip        (M4) streamed upload, removed after import/rejection
   tmp/staging-<upload_id>/           (M4) extraction staging, always removed
   cache/torch/checkpoints/           (M2) torchvision weights (default torch hub dir;
@@ -166,21 +169,22 @@ Notes:
 The majority baseline uses the same path but needs only labels. It fits train priors, scores the
 val labels, and writes `checkpoints/baseline.json`. It opens no images.
 
-### Database schema (`db/visionbench.db`, schema version 4)
+### Database schema (`db/visionbench.db`, schema version 5)
 
 | Table | Columns |
 |---|---|
 | `schema_version` | `version` (PK), `applied_at` |
-| `experiments` | `id` (PK), `created_at`, `started_at`, `finished_at`, `status`, `error`, `dataset_id`, `split_id`, `dataset_fingerprint`, `model`, `weights_source`, `weights_enum`, `weights_sha256`, `config_json`, `env_json`, `seed`, `best_epoch`, `best_metric`, `train_seconds`, `run_dir`, `runner_pid` (v4) |
+| `experiments` | `id` (PK), `created_at`, `started_at`, `finished_at`, `status`, `error`, `dataset_id`, `split_id`, `dataset_fingerprint`, `model`, `weights_source`, `weights_enum`, `weights_sha256`, `config_json`, `env_json`, `seed`, `best_epoch`, `best_metric`, `train_seconds`, `run_dir`, `runner_pid` (v4), `runner_create_time` (v5) |
 | `epoch_metrics` | `id`, `experiment_id` (FK), `epoch`, `train_loss`, `val_loss`, `val_accuracy`, `val_balanced_accuracy`, `lr`, `epoch_seconds`, `steps` |
 | `artifacts` | `id`, `experiment_id` (FK), `kind`, `relpath` (relative to data root), `sha256`, `size_bytes`, `created_at` |
 | `evaluations` (M3) | `id` (PK), `experiment_id` (FK), `split` (`val`\|`test`), `checkpoint` (`best`\|`last`\|`baseline`), `created_at`, `metrics_path`, `predictions_sha256`, `visionbench_version`, `forced`, `reason` (v3) |
 | `latency_measurements` (v3) | `id` (PK), `experiment_id` (FK), `checkpoint`, `device`, `device_name`, `torch_threads`, `input_size`, `warmup`, `iterations`, `results_json`, `path`, `created_at`, `visionbench_version` |
-| `jobs` (v4) | `id` (PK), `kind`, `status`, `params_json`, `result_json`, `error`, `progress_json`, `cancel_requested`, `worker_pid`, `child_pid`, `heartbeat_at`, `created_at`, `started_at`, `finished_at` |
+| `jobs` (v4) | `id` (PK), `kind`, `status`, `params_json`, `result_json`, `error`, `progress_json`, `cancel_requested`, `worker_pid`, `worker_create_time` (v5), `child_pid`, `child_create_time` (v5), `heartbeat_at`, `created_at`, `started_at`, `finished_at` |
 
 - Upgrades are additive only: `create_all` adds missing tables, and a fixed list of missing
   columns is added with `ALTER TABLE ... ADD COLUMN` (v3: `evaluations.forced/reason`; v4:
-  `experiments.runner_pid`). v1 → v2 → v3 → v4 databases upgrade in place (tested). A stored
+  `experiments.runner_pid`; v5: `experiments.runner_create_time`,
+  `jobs.worker_create_time/child_create_time`). v1 → … → v5 databases upgrade in place. A stored
   version newer than the code is an error; there are no migrations (Alembic) yet.
 - Every connection sets `PRAGMA busy_timeout=30000`. `journal_mode=WAL` is set once when the
   engine is opened (retried, because a database whose last writer was hard-killed can briefly
@@ -259,12 +263,35 @@ Unhandled exceptions return `500 internal_error` without leaking exception detai
   import root or torch home with `<data_root>` / `<import_root>` / `<torch_home>` as a last
   line of defence. Process ids are not returned either.
 - **CORS** allows only `VISIONBENCH_CORS_ORIGINS` (default the Vite dev server on
-  `localhost:5173` / `127.0.0.1:5173`), methods GET/POST.
+  `localhost:5173` / `127.0.0.1:5173`), methods GET/POST, headers `content-type` and
+  `x-visionbench-request`.
+- **Browser protection** (`api.security.LocalRequestGuard`, outermost middleware): see the
+  threat model below.
 - **Image endpoint** `GET /api/datasets/{id}/images?relpath=...` treats `relpath` as a key
   into the dataset's `files.json` records; it never joins user input onto a path. The file
   served is built from the stored record, resolved, and must lie inside `raw/`. Anything
   else (traversal, encoded traversal, absolute paths, unrecorded files) is
   `404 image_not_found`.
+
+### Threat model: a local API without authentication (M4.1)
+
+The API trusts whoever can reach `127.0.0.1:<port>`. That is the user, plus any program they
+run. Authentication is out of scope. What the API must withstand is **web pages open in the
+user's browser**, which can make the browser send requests to localhost:
+
+| Attack | Without protection | Defence |
+|---|---|---|
+| CSRF with a "simple" request: a cross-site `<form>` multipart upload, or a body-less `fetch(..., {method: "POST", mode: "no-cors"})` to `/api/jobs/{id}/cancel` | executed; CORS only hides the response | POST/PUT/PATCH/DELETE need `X-VisionBench-Request: 1` → otherwise `403 missing_client_header`. A browser sends a custom header cross-origin only after a CORS preflight, which a foreign origin fails, and a `<form>` cannot set headers. |
+| A cross-origin request that carries the header anyway (defence in depth) | — | an `Origin` header that is present but not in `VISIONBENCH_CORS_ORIGINS` (including `null`) → `403 origin_not_allowed` |
+| DNS rebinding: `attacker.example` re-resolved to 127.0.0.1, so the page is "same-origin" and can also read responses | executed and readable | the `Host` header must be `localhost`, `127.0.0.1` or `[::1]` (any port; plus `VISIONBENCH_EXTRA_TRUSTED_HOSTS`) → otherwise `400 invalid_host`, for every method including GET |
+| MIME sniffing of served images/JSON | — | `X-Content-Type-Options: nosniff` on every response |
+
+GET endpoints change nothing and need no header. A rebinding page cannot read them either,
+because of the Host check. Not covered: other local programs or users on the same machine,
+and a malicious browser extension. These need authentication, which is out of scope. The
+guard is a pure ASGI middleware, so upload bodies still stream through the byte limit.
+Starlette's `TrustedHostMiddleware` was not used because its 400 is plain text. The guard
+returns the standard JSON error body instead.
 
 ## Job lifecycle and worker (M4)
 
@@ -280,15 +307,29 @@ Unhandled exceptions return `500 internal_error` without leaking exception detai
 
 - **Enqueue** is one `INSERT ... SELECT ... WHERE (queued count) < :limit`, so the queue
   limit (`VISIONBENCH_MAX_QUEUED_JOBS`, default 10) holds under concurrent requests.
-- **One worker per data root**: `db/worker.lock` is created with `O_EXCL` and holds the
-  worker pid; a lock whose pid is dead is taken over, a live one makes a second worker exit.
+- **Process identity (M4.1).** A process is identified by **(pid, creation time)**, never by
+  its pid alone. Pids are reused, and quickly on Windows. `core.process` (psutil) records the
+  creation time next to every stored pid (`jobs.worker_*`, `jobs.child_*`,
+  `experiments.runner_*`). `process_is(pid, create_time)` is true only if that pid exists
+  **and** its creation time matches (±0.05 s). A missing creation time never matches.
+  `terminate_process` kills only after `process_is` is true, using the same psutil handle, which
+  re-checks the creation time. The other kill sites terminate a `Popen`/`multiprocessing`
+  handle of a child the caller started itself, which cannot refer to a reused pid.
+- **One worker per data root (M4.1)**: the worker holds an exclusive **OS lock** on
+  `db/worker.lock` for its whole lifetime: `msvcrt.locking` on one byte at offset 2^30 on
+  Windows, so the content stays readable, and `fcntl.flock` on POSIX. A second worker fails at
+  once with `another worker is running on this data root`. The OS releases the lock when the
+  holder dies, even by `taskkill /F`, so the next worker acquires it immediately. The file
+  content (`{"pid", "create_time"}` of the last holder) is informational and is never used to
+  decide anything.
 - **Claim** is `UPDATE jobs SET status='running' ... WHERE id = (oldest queued) AND status=
   'queued' RETURNING id`, a single atomic statement. The worker runs one job at a time.
 - **Child process.** Each job runs in a fresh `multiprocessing` *spawn* child calling the same
   library functions as the CLI (`execute_job` → `jobs.handlers`). The worker polls the child,
   writes `heartbeat_at` every `worker_heartbeat_seconds` (2 s), and watches
   `cancel_requested`. The child runs a watchdog thread that calls `os._exit` as soon as the
-  worker pid is gone, so killing the worker never leaves training running.
+  worker (pid + creation time) is gone, so killing the worker never leaves training running.
+  `heartbeat_at` is informational (shown by the API). Recovery does not use it.
 - **Progress.** Training updates `progress_json` after every epoch (epoch, latest metrics)
   and, throttled to 0.5 s, the step counter; the API returns it with the job.
 - **Cancel.** `POST /api/jobs/{id}/cancel`: a queued job is cancelled at once (a queued
@@ -297,13 +338,22 @@ Unhandled exceptions return `500 internal_error` without leaking exception detai
   checkpoints kept) and the job `cancelled by request`. If the child has not stopped
   `cancel_timeout_seconds` (30 s) after the request, it is terminated and the job and
   experiment are marked cancelled with a note.
-- **Recovery** runs when a worker starts (under the lock):
-  1. every `running` job whose worker pid is dead or whose heartbeat is older than
-     `heartbeat_stale_seconds` (30 s): terminate its child if still alive, mark its
-     experiment `failed` first, delete its upload temp files, then mark the job `failed`
-     with `interrupted: <reasons>`;
-  2. every `pending`/`running` experiment whose `runner_pid` is not alive (e.g. a CLI
-     `train` that was killed) → `failed` with `interrupted: no live process ...`.
+- **Recovery** (`recover(settings, lock)`) runs when a worker starts, and only while it
+  holds the lock. It refuses to run otherwise. At that moment no other worker can exist,
+  so:
+  1. **every** `running` job is orphaned, whatever its pids or heartbeat say. Recovery
+     terminates its child only if `process_is(child_pid, child_create_time)`; otherwise it
+     records that the child was not running. It marks the job's experiment `failed` first,
+     deletes its upload temp files, then marks the job `failed` with
+     `interrupted: worker <pid> is gone; <child note>`;
+  2. every `pending`/`running` experiment is marked `failed`
+     (`interrupted: runner process <pid> not running`) **unless**
+     `process_is(runner_pid, runner_create_time)` is true, e.g. a live CLI
+     `visionbench train`. The runner identity is written in the same transaction that creates
+     the experiment.
+
+  Recovery therefore does not wait for any heartbeat age. The former
+  `VISIONBENCH_HEARTBEAT_STALE_SECONDS` setting was removed.
 
   Jobs are never resumed automatically. Each recovery is logged as a WARNING.
 - `visionbench serve` starts the API and **one** `visionbench worker` subprocess.
