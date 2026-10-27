@@ -31,6 +31,7 @@ from typing import Any
 from visionbench.core.config import Settings
 from visionbench.core.errors import VisionBenchError
 from visionbench.core.redact import scrub_paths
+from visionbench.data.archive import cleanup_upload
 from visionbench.jobs.handlers import HANDLERS, JobContext
 from visionbench.jobs.params import validate_params
 from visionbench.jobs.store import JobStore
@@ -170,6 +171,13 @@ def _close_experiment(settings: Settings, job: dict[str, Any], status: str, note
             es.transition(exp_id, status, error=note)
 
 
+def _cleanup_job_temp(settings: Settings, job: dict[str, Any]) -> None:
+    """Temp files a killed child could not remove (its ``finally`` never ran)."""
+    upload_id = (job.get("params") or {}).get("upload_id")
+    if job.get("kind") == "dataset_import" and upload_id:
+        cleanup_upload(settings, upload_id)
+
+
 def recover(settings: Settings, stale_after_seconds: float) -> dict[str, list[dict[str, Any]]]:
     """Fail jobs and experiments orphaned by a dead worker/runner. Returns what was changed."""
     report: dict[str, list[dict[str, Any]]] = {"jobs": [], "experiments": []}
@@ -199,6 +207,7 @@ def recover(settings: Settings, stale_after_seconds: float) -> dict[str, list[di
                         exp_note = f"{note} (job {job['id']})"
                         es.transition(exp_id, "failed", error=exp_note)
                         report["experiments"].append({"experiment_id": exp_id, "error": exp_note})
+            _cleanup_job_temp(settings, job)
             js.finish(job["id"], "failed", error=note)
             report["jobs"].append({"job_id": job["id"], "kind": job["kind"], "error": note})
     with ExperimentStore(db) as es:
@@ -291,6 +300,7 @@ def run_job(store: JobStore, job: dict[str, Any], settings: Settings, wc: Worker
                     "(cooperative cancel not honoured)"
                 )
                 _close_experiment(settings, store.get(job_id), "cancelled", note)
+                _cleanup_job_temp(settings, job)
                 store.finish(job_id, "cancelled", error=note)
                 log.warning("job %s: %s", job_id, note)
                 return "cancelled"
@@ -299,12 +309,14 @@ def run_job(store: JobStore, job: dict[str, Any], settings: Settings, wc: Worker
         proc.join(15)
         note = "interrupted: worker stopped while the job was running"
         _close_experiment(settings, store.get(job_id), "failed", note)
+        _cleanup_job_temp(settings, job)
         store.finish(job_id, "failed", error=note)
         raise
     final = store.get(job_id)
     if final["status"] == "running":  # child died without recording an outcome
         note = f"child process exited with code {proc.exitcode} before finishing"
         _close_experiment(settings, final, "failed", note)
+        _cleanup_job_temp(settings, final)
         store.finish(job_id, "failed", error=note)
         final = store.get(job_id)
     log.info("job %s finished: %s", job_id, final["status"])

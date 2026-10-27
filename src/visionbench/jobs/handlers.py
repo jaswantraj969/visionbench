@@ -12,8 +12,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from visionbench.core.config import Settings
+from visionbench.data.archive import import_archive, resolve_import_path
+from visionbench.data.scan import ScanConfig
 from visionbench.data.split import SplitConfig, make_split
-from visionbench.data.store import verify_dataset
+from visionbench.data.store import import_dataset, verify_dataset
 from visionbench.evaluation.evaluate import evaluate_experiment
 from visionbench.evaluation.latency import measure_experiment_latency
 from visionbench.jobs import params as P
@@ -48,6 +50,43 @@ class JobContext:
         self._last_poll = now
         self.progress(step=step)
         self.check_cancel()
+
+
+def scan_config(s: Settings) -> ScanConfig:
+    return ScanConfig(
+        max_image_pixels=s.max_image_pixels,
+        min_images_per_class=s.min_images_per_class,
+        dhash_threshold=s.dhash_threshold,
+        low_info_std=s.low_info_std_threshold,
+        low_info_popcount_min=s.low_info_popcount_min,
+        low_info_popcount_max=s.low_info_popcount_max,
+        samples_per_class=s.report_samples_per_class,
+    )
+
+
+def handle_dataset_import(p: P.DatasetImportParams, ctx: JobContext) -> dict[str, Any]:
+    s = ctx.settings
+    ctx.progress(phase="importing", source=p.source)
+    if p.source == "upload":
+        r = import_archive(
+            s, p.upload_id, p.name, scan_config(s), original_filename=p.original_filename
+        )
+    else:  # re-checked here: the path must still resolve inside import_root
+        src = resolve_import_path(s, p.relpath)
+        r = import_dataset(
+            src,
+            p.name,
+            s.data_dir("datasets"),
+            scan_config(s),
+            source_description=f"import_root:{p.relpath}",
+        )
+    return {
+        "dataset_id": r.dataset_id,
+        "name": r.dataset["name"],
+        "total_images": r.dataset["total_images"],
+        "class_counts": r.dataset["class_counts"],
+        "issue_counts": r.dataset["validation"]["issue_counts"],
+    }
 
 
 def handle_dataset_split(p: P.DatasetSplitParams, ctx: JobContext) -> dict[str, Any]:
@@ -144,6 +183,7 @@ def handle_latency(p: P.LatencyParams, ctx: JobContext) -> dict[str, Any]:
 
 
 HANDLERS: dict[str, Callable[[Any, JobContext], dict[str, Any]]] = {
+    "dataset_import": handle_dataset_import,
     "dataset_split": handle_dataset_split,
     "dataset_verify": handle_dataset_verify,
     "train": handle_train,

@@ -138,8 +138,15 @@ def verify_dataset(datasets_dir: Path, dataset_id: str, *, full: bool = False) -
 
 
 def import_dataset(
-    src: Path, name: str, datasets_dir: Path, config: ScanConfig | None = None
+    src: Path,
+    name: str,
+    datasets_dir: Path,
+    config: ScanConfig | None = None,
+    *,
+    source_description: str | None = None,
 ) -> ImportResult:
+    """Validate ``src`` and snapshot it. ``source_description`` replaces the recorded absolute
+    source path (e.g. ``"upload:<file name>"`` for API uploads, whose source is a staging dir)."""
     config = config or ScanConfig()
     name = validate_name(name)
     datasets_dir.mkdir(parents=True, exist_ok=True)
@@ -183,7 +190,8 @@ def import_dataset(
             "id": dataset_id,
             "name": name,
             "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
-            "source_path": str(Path(src).resolve()),  # CLI-only metadata; never expose via API
+            # CLI-only metadata; never exposed via the API
+            "source_path": source_description or str(Path(src).resolve()),
             "fingerprint": fingerprint,
             "classes": scan.classes,
             "class_counts": counts,

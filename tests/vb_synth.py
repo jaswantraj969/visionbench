@@ -223,3 +223,39 @@ def build_shapes(root: Path, per_class: int, seed: int = 0, size: int = IMG) -> 
         for i in range(per_class):
             (d / f"{shape}_{i:04d}.png").write_bytes(encode(shape_image(rng, shape, size)))
     return root
+
+
+def write_zip(
+    path: Path,
+    members: list[tuple[str, bytes]],
+    *,
+    compression: int = 0,
+    raw_names: bool = False,
+) -> Path:
+    """Write a ZIP with exactly these member names (``raw_names`` bypasses zipfile's
+    separator normalisation so backslashes etc. are stored verbatim)."""
+    import zipfile
+
+    with zipfile.ZipFile(path, "w", compression=compression) as zf:
+        for name, data in members:
+            info = zipfile.ZipInfo("placeholder")
+            info.filename = name  # set after __init__: stored exactly as given
+            info.compress_type = compression
+            if not raw_names:
+                info = zipfile.ZipInfo(name)
+                info.compress_type = compression
+            zf.writestr(info, data)
+    return path
+
+
+def shapes_zip(
+    path: Path, per_class: int = 4, size: int = 32, top: str | None = None, seed: int = 0
+) -> Path:
+    """A valid dataset ZIP of synthetic shapes (optionally inside one top-level folder)."""
+    rng = np.random.default_rng(seed)
+    members = []
+    for shape in SHAPES:
+        for i in range(per_class):
+            rel = f"{shape}/{shape}_{i:03d}.png"
+            members.append((f"{top}/{rel}" if top else rel, encode(shape_image(rng, shape, size))))
+    return write_zip(path, members)
