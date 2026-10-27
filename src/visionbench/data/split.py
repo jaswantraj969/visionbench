@@ -11,6 +11,10 @@ Algorithm ``vb-split-v2``:
    platform-independent.
 4. Leakage is computed from the final entries, not assumed.
 
+Group-size warnings (D1, :func:`group_size_stats`): a multi-member group larger than its
+class's val target, or larger than 2% of its class, is listed in ``split_info.json`` and in the
+CLI output. They are not part of ``manifest.json``, whose bytes stay unchanged.
+
 ``vb-split-v1`` (M1) used a NumPy Generator permutation instead of step 3's hash order.
 """
 
@@ -21,7 +25,7 @@ import os
 import shutil
 import sys
 import uuid
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from fractions import Fraction
@@ -41,6 +45,7 @@ ALGORITHM = "vb-split-v2"
 SPLIT_NAMES = ("train", "val", "test")
 CONFLICT_POLICIES = ("exclude", "error")
 MANIFEST_FORMAT_VERSION = 1
+OVERSIZED_SHARE = Fraction(2, 100)  # a group above 2% of its class is reported
 
 
 @dataclass(frozen=True)
@@ -96,6 +101,7 @@ class SplitResult:
     manifest: dict[str, Any]
     manifest_sha256: str
     already_existed: bool
+    group_warnings: list[dict[str, Any]]
 
 
 def make_split_id(fingerprint: str, config: SplitConfig) -> str:
@@ -229,6 +235,57 @@ def compute_manifest(
     }
 
 
+def group_size_stats(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Group sizes from a manifest's entries: distribution, largest group per class, and the
+    oversized groups (multi-member groups larger than the class's val target or larger than
+    2% of the class). Deterministic: computed from the manifest alone."""
+    size: Counter[str] = Counter(e["group_id"] for e in manifest["entries"])
+    label_of = {e["group_id"]: e["label"] for e in manifest["entries"]}
+    by_class: dict[str, list[str]] = defaultdict(list)
+    for gid in size:
+        by_class[label_of[gid]].append(gid)
+    per_class: dict[str, dict[str, Any]] = {}
+    oversized: list[dict[str, Any]] = []
+    for label in sorted(manifest["counts"]):
+        total = manifest["counts"][label]["total"]
+        targets = manifest["target_counts"][label]
+        gids = sorted(by_class.get(label, []), key=lambda g: (-size[g], g))
+        per_class[label] = {
+            "class_total": total,
+            "largest_group_id": gids[0] if gids else None,
+            "largest_size": size[gids[0]] if gids else 0,
+            "val_target": targets["val"],
+            "test_target": targets["test"],
+        }
+        for gid in gids:
+            n = size[gid]
+            if n < 2:
+                break
+            reasons = []
+            if n > targets["val"]:
+                reasons.append("larger than the class's val target")
+            if n > OVERSIZED_SHARE * total:
+                reasons.append("larger than 2% of the class")
+            if reasons:
+                oversized.append(
+                    {
+                        "label": label,
+                        "group_id": gid,
+                        "size": n,
+                        "class_total": total,
+                        "share_of_class": round(n / total, 4),
+                        "val_target": targets["val"],
+                        "test_target": targets["test"],
+                        "reasons": reasons,
+                    }
+                )
+    return {
+        "size_distribution": {str(k): v for k, v in sorted(Counter(size.values()).items())},
+        "per_class": per_class,
+        "oversized": oversized,
+    }
+
+
 def make_split(datasets_dir: Path, dataset_id: str, config: SplitConfig) -> SplitResult:
     meta = load_dataset(datasets_dir, dataset_id)
     records = load_records(datasets_dir, dataset_id)
@@ -241,6 +298,7 @@ def make_split(datasets_dir: Path, dataset_id: str, config: SplitConfig) -> Spli
     )
     data = canonical_json_bytes(manifest)
     digest = hashlib.sha256(data).hexdigest()
+    warnings = group_size_stats(manifest)["oversized"]
     split_id = make_split_id(fingerprint, config)
     splits_dir = dataset_dir(datasets_dir, dataset_id) / "splits"
     final = splits_dir / split_id
@@ -252,7 +310,7 @@ def make_split(datasets_dir: Path, dataset_id: str, config: SplitConfig) -> Spli
                 f"split {split_id} exists but its manifest differs from the recomputed one; "
                 "refusing to overwrite"
             )
-        return SplitResult(split_id, final, manifest, digest, already_existed=True)
+        return SplitResult(split_id, final, manifest, digest, True, warnings)
 
     staging = splits_dir / f".tmp-split-{uuid.uuid4().hex}"
     staging.mkdir(parents=True)
@@ -267,10 +325,11 @@ def make_split(datasets_dir: Path, dataset_id: str, config: SplitConfig) -> Spli
                 "manifest_sha256": digest,
                 "numpy_version": np.__version__,
                 "python_version": sys.version.split()[0],
+                "group_size_warnings": warnings,
             },
         )
         os.rename(staging, final)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
-    return SplitResult(split_id, final, manifest, digest, already_existed=False)
+    return SplitResult(split_id, final, manifest, digest, False, warnings)

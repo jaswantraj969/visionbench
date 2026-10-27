@@ -67,6 +67,11 @@ def _print_report_summary(report: dict[str, Any]) -> None:
         f"[{dup.get('low_info_popcount_min', 0)}, {dup.get('low_info_popcount_max', 64)}]; "
         f"dHash threshold {dup['dhash_threshold']})"
     )
+    low = dup["perceptual_check_skipped_low_information"]
+    if "by_class" in low:
+        print("    low information per class (total; std/degenerate/popcount, overlapping):")
+        for label, c in low["by_class"].items():
+            print(f"      {label}: {c['total']}; {c['std']}/{c['degenerate']}/{c['popcount']}")
 
 
 def _cmd_dataset_import(args: argparse.Namespace) -> int:
@@ -173,12 +178,70 @@ def _cmd_dataset_split(args: argparse.Namespace) -> int:
     )
     for warning in m["warnings"]:
         print(f"  warning: {warning}")
+    gw = result.group_warnings
+    print(
+        f"  oversized groups: {len(gw)} (multi-member groups > the class's val target or > 2% "
+        "of the class; recorded in split_info.json)"
+    )
+    for w in gw[:20]:
+        print(
+            f"    {w['label']} {w['group_id']}: {w['size']} images "
+            f"({w['share_of_class']:.1%} of {w['class_total']}; val target {w['val_target']})"
+        )
+    if len(gw) > 20:
+        print(f"    ... {len(gw) - 20} more in split_info.json")
     lc = m["leakage_check"]
     print(
         f"  leakage check: groups_in_multiple_splits={lc['groups_in_multiple_splits']} "
         f"sha256_in_multiple_splits={lc['sha256_in_multiple_splits']} "
         f"(checked {lc['groups_checked']} groups, {lc['sha256_checked']} sha256 values)"
     )
+    return 0
+
+
+def _cmd_dataset_audit_split(args: argparse.Namespace) -> int:
+    from visionbench.data.audit import audit_split
+
+    s = _settings()
+    print(f"audit of {args.dataset_id} / {args.split_id} (seed {args.seed})")
+    result = audit_split(
+        s.data_dir("datasets"), args.dataset_id, args.split_id, seed=args.seed, progress=print
+    )
+    a = result.audit
+    c, w, nm = a["counts"], a["within_dhash_threshold"], a["near_miss_band"]
+    cc = w["consistency_check"]
+    print(f"  output: {result.path}")
+    print(
+        f"  images: {c['entries']} (train {c['train']}, val {c['val']}, test {c['test']}); "
+        f"low information {c['low_information']} (val/test {c['low_information_val_test']})"
+    )
+    print(f"  dHash threshold {w['threshold']}:")
+    print(
+        f"    consistency check: {'OK' if cc['ok'] else 'FAILED'} ({cc['count']} informative "
+        "val/test images within the threshold of an informative train image)"
+    )
+    print(
+        "    val/test images whose nearest train image (low-info included) is within the "
+        f"threshold: {w['any_nearest_train_within_threshold']} {w['by_low_information']}"
+    )
+    print(
+        f"    near-miss band {nm['range'][0]}..{nm['range'][1]}: "
+        f"{nm['informative_queries_with_nearest_informative_train_in_band']} val/test images; "
+        f"{nm['informative_pairs_in_band']} cross-split pairs"
+    )
+    for name, hist in a["nearest_train_histograms"].items():
+        for cat, counts in hist.items():
+            shown = " ".join(f"{k}:{v}" for k, v in counts.items())
+            print(f"  nearest-train {name} distance, {cat}: {shown}")
+    print(
+        f"  exact sha256 matches across splits: {a['cross_split_exact_sha256']['count']}; "
+        f"decoded-pixel-identical: {a['cross_split_pixel_identical']['count']}"
+    )
+    g = a["groups"]
+    print(f"  group sizes: {g['size_distribution']}")
+    print(f"  oversized groups: {len(g['oversized'])}")
+    print(f"  pairs: {a['pairs']}")
+    print(f"  contact sheets: {len(result.sheets)} in {result.path / 'sheets'}")
     return 0
 
 
@@ -532,6 +595,16 @@ def build_parser() -> argparse.ArgumentParser:
     spl.add_argument("--conflict-policy", choices=["exclude", "error"])
     spl.add_argument("--allow-missing-classes", action="store_true")
     spl.set_defaults(func=_cmd_dataset_split)
+
+    aud = dsub.add_parser(
+        "audit-split",
+        parents=[common],
+        help="independent leakage audit of a split (pHash + dHash, contact sheets)",
+    )
+    aud.add_argument("dataset_id")
+    aud.add_argument("split_id")
+    aud.add_argument("--seed", type=int, default=0, help="seed for the sampled pairs")
+    aud.set_defaults(func=_cmd_dataset_audit_split)
 
     trn = sub.add_parser("train", parents=[common], help="train one model on a split (explicit)")
     trn.add_argument("--config", type=Path, help="YAML training config")

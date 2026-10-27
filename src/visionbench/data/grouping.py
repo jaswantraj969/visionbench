@@ -54,6 +54,28 @@ DEFAULT_POPCOUNT_MIN = 8
 DEFAULT_POPCOUNT_MAX = 56
 
 
+LOW_INFO_REASONS = ("std", "degenerate", "popcount")
+
+
+def low_information_reasons(
+    record: FileRecord,
+    low_info_std: float,
+    popcount_min: int = DEFAULT_POPCOUNT_MIN,
+    popcount_max: int = DEFAULT_POPCOUNT_MAX,
+) -> list[str]:
+    """Which low-information tests ``record`` fails (several can apply; see below)."""
+    h = record.dhash_int
+    popcount = h.bit_count()
+    reasons = []
+    if record.gray_std < low_info_std:
+        reasons.append("std")
+    if h in (0, ALL_ONES):
+        reasons.append("degenerate")
+    if popcount < popcount_min or popcount > popcount_max:
+        reasons.append("popcount")
+    return reasons
+
+
 def is_low_information(
     record: FileRecord,
     low_info_std: float,
@@ -67,14 +89,7 @@ def is_low_information(
     gradients pass the std test but give such sparse/dense hashes, which then sit within a few
     bits of each other and would form false groups.
     """
-    h = record.dhash_int
-    popcount = h.bit_count()
-    return (
-        record.gray_std < low_info_std
-        or h in (0, ALL_ONES)
-        or popcount < popcount_min
-        or popcount > popcount_max
-    )
+    return bool(low_information_reasons(record, low_info_std, popcount_min, popcount_max))
 
 
 def make_group_id(members: Sequence[str]) -> str:

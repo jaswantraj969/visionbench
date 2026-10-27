@@ -7,11 +7,11 @@ from collections import Counter
 from typing import Any
 
 from visionbench.core.seeding import derived_rng
-from visionbench.data.grouping import Grouping
+from visionbench.data.grouping import LOW_INFO_REASONS, Grouping, low_information_reasons
 from visionbench.data.records import IssueCategory
 from visionbench.data.scan import ScanConfig, ScanResult
 
-REPORT_FORMAT_VERSION = 1
+REPORT_FORMAT_VERSION = 2  # 2 (D1): low-information breakdown per class and reason
 
 
 def _summary(values: list[int]) -> dict[str, float]:
@@ -51,6 +51,21 @@ def build_report(
         }
 
     multi = grouping.multi_member
+    low_info = set(grouping.low_information)
+    low_by_class: dict[str, dict[str, int]] = {
+        c: dict.fromkeys(("total", *LOW_INFO_REASONS), 0) for c in scan.classes
+    }
+    for r in records:
+        if r.relpath in low_info:
+            entry = low_by_class[r.label]
+            entry["total"] += 1
+            for reason in low_information_reasons(
+                r,
+                config.low_info_std,
+                config.low_info_popcount_min,
+                config.low_info_popcount_max,
+            ):
+                entry[reason] += 1
     return {
         "format_version": REPORT_FORMAT_VERSION,
         "dataset_id": dataset_id,
@@ -80,6 +95,11 @@ def build_report(
             "label_conflict_groups": [g.to_dict() for g in grouping.conflicts],
             "perceptual_check_skipped_low_information": {
                 "count": len(grouping.low_information),
+                # reasons overlap: one image can fail several tests
+                "by_class": low_by_class,
+                "by_reason": {
+                    k: sum(c[k] for c in low_by_class.values()) for k in LOW_INFO_REASONS
+                },
                 "relpaths": list(grouping.low_information),
             },
         },

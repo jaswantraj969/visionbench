@@ -56,8 +56,15 @@ def test_import_writes_snapshot_metadata_and_report(messy, messy_config, tmp_pat
     assert [i["relpath"] for i in report["issues"]["nested_directory"]["items"]] == ["alpha/subdir"]
     dup = report["duplicates"]
     assert dup["multi_member_groups"] == 3 and dup["exact_duplicate_files"] == 2
+    uniform = {"total": 1, "std": 1, "degenerate": 1, "popcount": 1}  # all three tests fail
     assert dup["perceptual_check_skipped_low_information"] == {
         "count": 2,
+        "by_class": {
+            "alpha": uniform,
+            "beta": uniform,
+            "gamma": {"total": 0, "std": 0, "degenerate": 0, "popcount": 0},
+        },
+        "by_reason": {"std": 2, "degenerate": 2, "popcount": 2},
         "relpaths": ["alpha/uniform_red.png", "beta/uniform_blue.png"],
     }
     assert [g["members"] for g in dup["label_conflict_groups"]] == [
