@@ -423,7 +423,8 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     if not args.no_worker:
         env = os.environ | {"VISIONBENCH_DATA_ROOT": str(s.resolved_data_root)}
         worker = subprocess.Popen([sys.executable, "-m", "visionbench.cli", "worker"], env=env)
-        print(f"worker started (pid {worker.pid})")
+        # with a Windows venv this pid is the python launcher; the worker logs its own pid
+        print(f"worker process started (pid {worker.pid})")
     try:
         uvicorn.run(create_app(s), host=host, port=port, log_level="info")
     finally:
