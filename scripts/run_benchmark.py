@@ -58,8 +58,26 @@ SEEDS = (0, 1, 2)
 LOW_INFO_CLASSES = {"SeaLake": "78 % low-information", "Forest": "34 % low-information"}
 VAL_LABEL = "VALIDATION (selection-biased) — not test results"
 EXP_RE = re.compile(r"experiment (exp-\d{8}-\d{6}-[0-9a-f]{6}) running")
+# The CLI's final line; stopped_reason is not stored in the experiment DB.
+STOPPED_RE = re.compile(r"\(stopped: (\w+); best epoch")
 EVAL_RE = re.compile(r"\b(ev-\d{8}-\d{6}-[0-9a-f]{6})\b")
 LAT_RE = re.compile(r"\b(lat-\d{8}-\d{6}-[0-9a-f]{6})\b")
+
+
+def _relative(path: Path) -> str:
+    """Path relative to the working directory (the repo root), so runs.json has no user path."""
+    try:
+        return path.resolve().relative_to(Path.cwd().resolve()).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _stopped_reason(rec: dict[str, Any]) -> str:
+    """Why training stopped, from the CLI's final line in the run's log."""
+    log = Path(rec["log"]) if rec.get("log") else None
+    text = log.read_text(encoding="utf-8", errors="replace") if log and log.is_file() else ""
+    m = STOPPED_RE.search(text)
+    return m.group(1) if m else "unknown"
 
 
 def _keep_awake() -> None:
@@ -217,7 +235,7 @@ class Benchmark:
             "attempt": attempt,
             "status": "in_progress",
             "started_at": now(),
-            "log": str(log),
+            "log": _relative(log),
         }
         self.data["runs"].append(rec)
         self.save()
@@ -321,6 +339,7 @@ class Benchmark:
                         "per_class": doc["metrics"]["per_class"],
                         "best_epoch": exp["best_epoch"],
                         "epochs": len(es.epochs(r["experiment_id"])),
+                        "stopped": _stopped_reason(r),
                         "train_seconds": exp["train_seconds"],
                     }
                 )
@@ -339,8 +358,9 @@ class Benchmark:
             "",
             "| model | val balanced accuracy (mean ± sd) | val macro F1 (mean ± sd) | "
             "per-seed bal. acc. (s0 / s1 / s2) | per-seed macro F1 (s0 / s1 / s2) | "
-            "best epoch (s0/s1/s2) | epochs run | train time s (s0/s1/s2) |",
-            "|---|---|---|---|---|---|---|---|",
+            "best epoch (s0/s1/s2) | epochs trained (s0/s1/s2) | stopped_reason (s0/s1/s2) | "
+            "train time s, indicative (s0/s1/s2) |",
+            "|---|---|---|---|---|---|---|---|---|",
         ]
         for model in MODELS:
             rs = rows[model]
@@ -357,9 +377,27 @@ class Benchmark:
                 + " | "
                 + " / ".join(str(r["epochs"]) for r in rs)
                 + " | "
+                + " / ".join(r["stopped"] for r in rs)
+                + " | "
                 + " / ".join(f"{r['train_seconds']:.0f}" for r in rs)
                 + " |"
             )
+        capped = [
+            f"{model} seed {r['seed']} ({r['exp']}; best epoch {r['best_epoch']})"
+            for model in MODELS
+            for r in rows[model]
+            if r["stopped"] == "epochs_completed"
+        ]
+        out += [
+            "",
+            "Train time is indicative only: it depends on the session and on the laptop's "
+            "thermal state.",
+            "",
+            "Runs that reached the 25-epoch cap (stopped_reason `epochs_completed`) instead of "
+            "early stopping — a finding, not acted on: "
+            + ("; ".join(capped) if capped else "none")
+            + ".",
+        ]
         classes = next(iter(r["per_class"] for rs in rows.values() for r in rs), {})
         out += [
             "",
