@@ -1,8 +1,9 @@
 # VisionBench
 
 Reproducible computer-vision benchmarking and explainability platform. **Current state: milestone
-M4 (FastAPI backend, single-worker job runner, secure dataset upload) plus D1 (first real
-dataset, EuroSAT RGB, imported and audited; duplicate thresholds not yet chosen)**. See
+M4 (FastAPI backend, single-worker job runner, secure dataset upload) plus D1 (EuroSAT RGB
+imported and audited) and B1 (frozen `eurosat-v1` benchmark protocol; 15 runs trained and
+evaluated on VAL only; test untouched until M8)**. See
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for what comes next.
 
 ## What exists now
@@ -203,6 +204,22 @@ num_workers: 0
   writes `<data_root>/reports/<report_id>/comparison.{json,md}`. Comparisons on val state
   that val metrics are selection-biased.
 - Ranking uses validation metrics only, and test results get no winner label.
+
+## Reproduce the eurosat-v1 benchmark runs (validation only)
+
+Protocol: [benchmarks/eurosat-v1/BENCHMARK_PROTOCOL.md](benchmarks/eurosat-v1/BENCHMARK_PROTOCOL.md). Data source: [DATASETS.md](DATASETS.md).
+
+```powershell
+.\.venv\Scripts\visionbench.exe dataset import var\downloads\extracted\EuroSAT_RGB --name eurosat-rgb
+.\.venv\Scripts\visionbench.exe dataset split ds-61112928e412 --seed 0 --dhash-threshold 5 --low-info-std 3.0 --low-info-popcount-min 8 --low-info-popcount-max 56 --conflict-policy exclude
+.\.venv\Scripts\python.exe scripts\pilot_benchmark.py benchmarks\eurosat-v1
+.\.venv\Scripts\python.exe scripts\run_benchmark.py train benchmarks\eurosat-v1
+.\.venv\Scripts\python.exe scripts\run_benchmark.py evaluate-val benchmarks\eurosat-v1
+.\.venv\Scripts\python.exe scripts\run_benchmark.py latency benchmarks\eurosat-v1
+.\.venv\Scripts\visionbench.exe compare <seed-0 exp ids, protocol order> --split val --eval-ids <their val eval ids> --latency-device cuda --note "VALIDATION (selection-biased) — not test results"
+.\.venv\Scripts\python.exe scripts\run_benchmark.py summary benchmarks\eurosat-v1
+.\.venv\Scripts\python.exe scripts\run_benchmark.py check benchmarks\eurosat-v1
+```
 
 ## Run tests and lint
 

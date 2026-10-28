@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased: B1 eurosat-v1 benchmark, validation only (2026-10-28)
+
+### Added
+- `benchmarks/eurosat-v1/`: frozen `BENCHMARK_PROTOCOL.md`, one YAML per model
+  (majority_baseline, small_cnn_scratch_64, resnet18_imagenet_224,
+  efficientnet_b0_imagenet_224, resnet18_scratch_64 control) and `PROTOCOL_HASHES.txt`.
+  Committed before the first experiment.
+- `scripts/pilot_benchmark.py`: 1-epoch timing and peak GPU memory per model, a bitwise GPU
+  determinism check (two identical 50-step runs), and a budget upper bound (`pilot.json`).
+- `scripts/run_benchmark.py`: `train` (hash check, resumable, interruptions recorded and rerun,
+  at most one retry for run-caused failures, stop on CUDA OOM), `annotate`, `evaluate-val`,
+  `latency`, `summary` (mean ± sd, per-seed values, best epoch, epochs trained,
+  stopped_reason, indicative train time, per-class recall with SeaLake/Forest flagged, list of
+  runs that reached the epoch cap) and `check` (no test evaluations).
+- `benchmarks/eurosat-v1/runs.json` and `results/` (seed-0 VAL comparison, multi-seed VAL
+  summary, seed-0 latency). Labelled "VALIDATION (selection-biased) — not test results".
+- EXPERIMENT_PROTOCOL.md links the benchmark protocol; README has the reproduction commands.
+
+### Changed
+- `dataset audit-split`: field renamed to `phash_nearest_within_dhash_threshold_value`
+  (different hash scales; indicative only), audit format version 2.
+- DATASETS.md: Copernicus notice without a year (none is stated by the dataset authors), the
+  frozen split, and the low-information limitation.
+
+### Runs (not committed: `var/`)
+- 15 benchmark runs, all completed on the first attempt; 12 pilot runs; 15 VAL evaluations;
+  8 latency measurements. No test evaluation.
+
 ## Unreleased: D1 EuroSAT onboarding (2026-10-27/28)
 
 ### Added

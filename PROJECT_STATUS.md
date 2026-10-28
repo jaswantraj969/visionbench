@@ -1,6 +1,6 @@
 # Project Status
 
-_Last updated: 2026-10-28, end of D1 (EuroSAT onboarding; pending supervisor review and the threshold decision)._
+_Last updated: 2026-10-28, end of B1 (eurosat-v1 protocol frozen; 15 runs trained and evaluated on VAL only; pending supervisor review)._
 
 ## Current state
 - **M0:** foundation (config, seeding, env info, health/ready API).
@@ -54,11 +54,29 @@ _Last updated: 2026-10-28, end of D1 (EuroSAT onboarding; pending supervisor rev
   - low-information breakdown per class and reason in `report.json`;
   - EuroSAT RGB license verified (MIT + Copernicus attribution; DATASETS.md), downloaded from
     Zenodo (MD5 matches), imported as `ds-61112928e412` (27,000 images, `verify --full` OK);
-  - 9 calibration splits and audits for dHash thresholds 3 and 5. **The thresholds have not
-    been chosen**; the supervisor decides from REVIEW_PACKET.md.
+  - 9 calibration splits and audits for dHash thresholds 3 and 5. The supervisor chose
+    `sp-55320e11726c` (dHash 5, std 3.0, popcount [8, 56]) as the frozen benchmark split
+    (DATASETS.md).
+- **B1** (eurosat-v1 benchmark, VALIDATION only):
+  - protocol + 5 YAMLs frozen and hashed (`benchmarks/eurosat-v1/`, commit `c7d32c0`)
+    before the first experiment; no amendments;
+  - pilot (`pilot.json`): batch 64 fits all models; GPU training bitwise deterministic for
+    all four trainable models;
+  - `scripts/run_benchmark.py`: resumable driver (hash check, interruption handling, OOM
+    stop), VAL evaluation, latency, multi-seed summary, no-test check;
+  - 15/15 runs completed on the first attempt (no reruns, no interruptions); 15 VAL
+    evaluations, 8 latency measurements, the seed-0 VAL comparison and the multi-seed
+    summary in `benchmarks/eurosat-v1/results/`. All numbers there are VALIDATION
+    (selection-biased), not test results;
+  - **0 test evaluations exist in the whole database.** Test is evaluated once, at M8.
 - There is no authentication, Grad-CAM, robustness suite, or frontend.
 
 ## Verified in session (2026-10-27, Windows 11, Python 3.11.15, torch 2.14.1+cu130, RTX 3050 6GB)
+- B1 (2026-10-28, after the last code change): `ruff check .` / `ruff format --check .` pass;
+  `pytest -q`: 285 passed and 1 skipped in 386.02 s; with `CUDA_VISIBLE_DEVICES=-1`: 285
+  passed and 1 skipped in 215.66 s (no coverage run in B1).
+- B1 benchmark: `run_benchmark.py check` reports 0 test evaluations for the 15 benchmark
+  and 12 pilot experiments, and 0 in the whole database.
 - `ruff check .` and `ruff format --check .` pass.
 - `pytest -q --cov=visionbench` (D1): 285 passed and 1 skipped (file symlink) in 511.76 s,
   coverage 94%. With `CUDA_VISIBLE_DEVICES=-1`: 285 passed and 1 skipped in 539.21 s
@@ -90,14 +108,15 @@ _Last updated: 2026-10-28, end of D1 (EuroSAT onboarding; pending supervisor rev
 - Concurrency beyond one API process + one worker; very large uploads (limits are tested with
   small values).
 - Python 3.12/3.13.
-- Training or evaluation on a real dataset: not started (EuroSAT is imported and audited only).
+- Any TEST-split number for EuroSAT: none exists by design (M8).
+- Training times are indicative (one shared laptop GPU; throughput changed during the
+  session, see REVIEW_PACKET.md).
 - The audit does not search near-duplicates within val/test or between val and test by
   perceptual hash, only val/test against train. Near-uniform EuroSAT tiles (3357
   low-information images, mostly SeaLake and Forest) cannot be checked by hashing.
 
 ## Blockers
-- Waiting for the supervisor's choice of the dHash and low-information thresholds for EuroSAT.
-- The Copernicus attribution `[Year]` is not stated by the dataset source (DATASETS.md).
+- None. B1 awaits supervisor review (REVIEW_PACKET.md).
 
 ## Next task
 M5: Grad-CAM for registry CNNs (overlays as artifacts, randomized-weights sanity check), run

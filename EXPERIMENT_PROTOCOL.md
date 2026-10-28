@@ -3,6 +3,9 @@
 This protocol governs all benchmarks. Status per section: **implemented (M1)**, or
 **planned** (rules that later milestones must follow).
 
+Frozen per-benchmark protocols add to these rules, and nothing in them is edited after the freeze (changes are dated amendments):
+- [benchmarks/eurosat-v1/BENCHMARK_PROTOCOL.md](benchmarks/eurosat-v1/BENCHMARK_PROTOCOL.md) (EuroSAT RGB, frozen in VB-B1, commit `c7d32c0`).
+
 ## 1. Dataset format (implemented, M1)
 
 ```
