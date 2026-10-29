@@ -29,8 +29,9 @@ Subcommands (all take the protocol folder, e.g. ``benchmarks/eurosat-v1``):
     ``interrupted`` and rerun with the identical command. Any failed evaluation stops the driver
     for a human to judge; there is no automatic retry.
 - ``latency``: CPU and CUDA latency for seed 0 of each trainable model.
-- ``check``: assert that no evaluation with split=test exists for any benchmark or pilot
-  experiment.
+- ``check``: before M8 (no ``results/test_runs.json``), assert that no TEST evaluation of any
+  kind exists. After M8, assert exactly 1 clean TEST and 12 robustness TEST evaluations (paired
+  with it) per benchmark run, and none for pilot/repro-check experiments or anything else.
 - ``freeze-check`` (M8, before ``evaluate-test``): the automatable items of the freeze checklist.
   - Hashes: the protocol, robustness and final-analysis-plan hashes verify.
   - Zero TEST evaluations of any kind (``check``).
@@ -421,6 +422,8 @@ class Benchmark:
                 if sha256(rdir / name.lstrip("*")) != digest:
                     failures.append(f"robustness hash mismatch: {name}")
         print(f"b. final analysis plan sha256 {self.verify_plan()}: OK", flush=True)
+        if self.test_record_path().is_file():
+            raise SystemExit("results/test_runs.json exists: the TEST evaluation has started")
         self.check()
         print("c. zero TEST evaluations (clean and robustness): OK", flush=True)
         text = (self.dir / "BENCHMARK_PROTOCOL.md").read_text(encoding="utf-8")
@@ -504,10 +507,29 @@ class Benchmark:
         print(f"test evaluations in the whole database: {len(all_test)}")
         print(f"robustness val evaluations of benchmark experiments: {len(rob_val)}")
         print(f"robustness test evaluations in the whole database: {len(rob_test)}")
-        assert not test_evals, f"TEST evaluations exist: {[e['id'] for e in test_evals]}"
-        assert not all_test, f"TEST evaluations exist: {[e['id'] for e in all_test]}"
-        assert not rob_test, f"TEST robustness evaluations exist: {[r['id'] for r in rob_test]}"
-        print("OK: zero test evaluations of any kind (clean or robustness) in the whole database")
+        if not self.test_record_path().is_file():  # before M8: nothing may touch TEST
+            assert not test_evals, f"TEST evaluations exist: {[e['id'] for e in test_evals]}"
+            assert not all_test, f"TEST evaluations exist: {[e['id'] for e in all_test]}"
+            assert not rob_test, f"TEST robustness evaluations exist: {[r['id'] for r in rob_test]}"
+            print(
+                "OK: zero test evaluations of any kind (clean or robustness) in the whole database"
+            )
+            return
+        # after M8: exactly one clean TEST evaluation and 12 robustness TEST evaluations per
+        # benchmark run, paired with it; nothing for pilot / repro-check experiments.
+        for exp in sorted(bench):
+            clean = [e for e in all_test if e["experiment_id"] == exp]
+            assert len(clean) == 1, f"{exp}: {len(clean)} clean TEST evaluations, expected 1"
+            rob = [r for r in rob_test if r["experiment_id"] == exp]
+            assert len(rob) == 12, f"{exp}: {len(rob)} robustness TEST evaluations, expected 12"
+            assert {r["clean_evaluation_id"] for r in rob} == {clean[0]["id"]}, exp
+        other = [e["id"] for e in all_test if e["experiment_id"] not in bench]
+        other += [r["id"] for r in rob_test if r["experiment_id"] not in bench]
+        assert not other, f"TEST evaluations outside the benchmark runs: {other}"
+        print(
+            f"OK: exactly 1 clean TEST and 12 robustness TEST evaluations for each of the "
+            f"{len(bench)} benchmark runs; 0 for pilot/repro-check and anything else"
+        )
 
     def summary(self) -> str:
         from visionbench.core.jsonio import read_json
