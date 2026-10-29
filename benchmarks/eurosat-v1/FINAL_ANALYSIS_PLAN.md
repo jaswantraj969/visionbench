@@ -187,3 +187,38 @@ The report states these, whatever the numbers turn out to be:
   2. the Benchmark page shows the TEST section;
   3. `run_benchmark.py check` asserts exactly 1 clean TEST evaluation and 12 robustness TEST
      evaluations per run.
+
+## Amendment 1 (procedural), 2026-10-29
+
+**The defect:** the first TEST materialization pass (§2) stopped with
+`gaussian_noise/0.04: stored condition covers different images`.
+- The corrupted-image cache path,
+  `cache/corruptions/<dataset_id>/<split_id>/<suite>/<corruption>/<severity>/`, had no
+  val/test component.
+- The TEST pass therefore found the VAL conditions of the same split in the same folder, and
+  refused.
+- Nothing was written by that pass.
+
+**The fix:**
+- **Path:** the cache path now includes the split name,
+  `cache/corruptions/<dataset_id>/<split_id>/<split>/<suite>/<corruption>/<severity>/`. This
+  supersedes the storage path in `robustness/ROBUSTNESS_PROTOCOL.md` §3, step 4. That frozen file is
+  not edited.
+- **VAL cache:** the existing VAL cache was *moved* (not regenerated) into `.../val/`. All 12
+  VAL conditions then verified file by file, and their condition hashes equal the M6 values
+  recorded in the database.
+- **Test:** a regression test materializes VAL and then TEST on the same split, and checks that
+  both succeed and stay separate.
+
+**What did not change:**
+- the corruption functions and bytes;
+- the seeds, the suite and its hashes;
+- the evaluation logic;
+- this plan's analysis (§4-§8).
+
+**State and consequences:**
+- No robustness TEST result existed when the defect was found and fixed: 0 robustness TEST rows.
+- The 15 clean TEST evaluations (`results/test_runs.json`) were completed before the defect
+  surfaced. They do not depend on the cache, and they are **not redone**.
+- This amendment departs from §3.4 ("no code changes between the first TEST evaluation and the
+  last robustness TEST evaluation"). The owner authorized it.

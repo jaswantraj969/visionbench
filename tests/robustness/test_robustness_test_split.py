@@ -106,3 +106,20 @@ def test_more_than_one_test_evaluation_is_an_error(unlocked) -> None:
         pytest.raises(RobustnessError, match="2 clean TEST evaluations"),
     ):
         single_test_evaluation(store, base)
+
+
+def test_val_then_test_materialization_on_one_split_stays_separate(unlocked) -> None:
+    """Regression (final analysis plan, amendment 1): the cache path carries the split name, so a
+    TEST pass after a VAL pass on the same split_id no longer collides with the VAL cache."""
+    s, e, suite = unlocked["settings"], unlocked["env"], unlocked["suite"]
+    val = M.materialize(s, e.dataset_id, e.split_id, suite, "val")
+    test = M.materialize(s, e.dataset_id, e.split_id, suite, "test")
+    again = M.materialize(s, e.dataset_id, e.split_id, suite, "val")
+    assert [r.condition_hash for r in again] == [r.condition_hash for r in val]
+    roots = {
+        split: M.suite_root(s, M.open_split(s, e.dataset_id, e.split_id, split), suite)
+        for split in ("val", "test")
+    }
+    assert roots["val"] != roots["test"]
+    assert roots["val"].parent.name == "val" and roots["test"].parent.name == "test"
+    assert {r.condition_hash for r in val}.isdisjoint({r.condition_hash for r in test})

@@ -186,6 +186,7 @@ def create_robustness(
         / "corruptions"
         / exp["dataset_id"]
         / exp["split_id"]
+        / body.split
         / suite.name
     )
     missing = [

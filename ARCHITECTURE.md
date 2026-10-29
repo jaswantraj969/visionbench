@@ -125,7 +125,7 @@ var/
   cache/norm_stats/<dataset_id>/<split_id>/norm_stats_train_<N>px.json
                                      (M3 step 0) train-only mean/std cache per resolution;
                                      split directories are never written after creation
-  cache/corruptions/<dataset_id>/<split_id>/<suite>/<corruption>/<severity>/
+  cache/corruptions/<dataset_id>/<split_id>/<split>/<suite>/<corruption>/<severity>/
                                      (M6) condition.json (hashed manifest) + <class>/<stem>.png;
                                      written once (temp dir + rename), re-verified on rerun
   reports/<report_id>/               (M3) rp-...: comparison.json, comparison.md

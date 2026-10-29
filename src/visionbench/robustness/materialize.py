@@ -1,6 +1,9 @@
 """Materialize every condition of a suite once, as lossless PNGs, with a hashed manifest.
 
-Layout: ``<data_root>/cache/corruptions/<dataset_id>/<split_id>/<suite>/<corruption>/<severity>/``
+Layout:
+``<data_root>/cache/corruptions/<dataset_id>/<split_id>/<split>/<suite>/<corruption>/<severity>/``
+(``<split>`` is ``val`` or ``test``; before amendment 1 it was missing, so a TEST pass collided
+with the VAL cache)
 with ``condition.json`` and one ``<class>/<stem>.png`` per image. Every model evaluates these
 exact files.
 
@@ -101,7 +104,14 @@ def open_split(settings: Settings, dataset_id: str, split_id: str, split: str) -
 
 
 def suite_root(settings: Settings, src: SplitSource, suite: Suite) -> Path:
-    return settings.data_dir("cache") / "corruptions" / src.dataset_id / src.split_id / suite.name
+    return (
+        settings.data_dir("cache")
+        / "corruptions"
+        / src.dataset_id
+        / src.split_id
+        / src.split
+        / suite.name
+    )
 
 
 def condition_dir(root: Path, cond: Condition) -> Path:
