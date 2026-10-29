@@ -181,6 +181,7 @@ def test_gradcam_scratch_model(trained) -> None:
     assert r.status_code == 200, r.text
     g = r.json()
     assert g["cam"]["feature_map_size"] == [4, 4] and g["cam"]["resolution"] == "4x4"
+    assert g["gradcam_version"] == "vb-gradcam-2" and g["cam"]["layer"] == "features.block4.relu"
     values = np.array(g["cam"]["values"])
     assert values.shape == (4, 4) and values.min() >= 0 and values.max() <= 1
     assert g["cam"]["all_zero"] or values.max() == pytest.approx(1.0)

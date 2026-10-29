@@ -15,7 +15,7 @@ CLASSES = ["a", "b", "c"]
 @pytest.mark.parametrize(
     ("name", "size", "target"),
     [
-        ("small_cnn", 64, "features.block4.conv"),
+        ("small_cnn", 64, "features.block4.relu"),
         ("resnet18", 224, "layer4"),
         ("efficientnet_b0", 224, "features.8"),
     ],

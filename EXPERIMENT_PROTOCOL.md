@@ -463,6 +463,14 @@ Rules:
   never drawn there.
 - A CAM without positive evidence is reported as all zeros with a warning; it is never rescaled
   into a heatmap.
+- Target layers are post-activation feature maps for every model (small_cnn: post-ReLU, pre-pool
+  map of block4, since M6 step 0 / `vb-gradcam-2`; before that the pre-BN conv output was used).
+  Every response states its `gradcam_version`.
+- Real-model check (report only): cascading randomization from the top (Adebayo et al.) on the
+  seed-0 EuroSAT models, `scripts/cascading_randomization.py`; results in
+  `benchmarks/eurosat-v1/results/gradcam_cascading_randomization.md`. Chance level matters:
+  for independent maps, E|Spearman rho| is 0.5 for a 2x2 CAM (exact) but about 0.10-0.12 for
+  7x7 / 8x8, so the 0.5 flag cannot be read for resnet18 at 64 px.
 - Demo images are VAL images chosen by a seeded rule, labelled "VALIDATION images - demo, not
   results". Never test images (section 6); never hand-picked examples.
 - Shared overlays of EuroSAT images carry the dataset attribution (DATASETS.md).

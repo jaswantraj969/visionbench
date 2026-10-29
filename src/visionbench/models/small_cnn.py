@@ -24,7 +24,11 @@ class ConvBlock(nn.Module):
 class SmallCNN(nn.Module):
     """Default input 64x64; any input >= 16 px works (four 2x poolings)."""
 
-    TARGET_LAYER = "features.block4.conv"  # last conv layer, for Grad-CAM (M5)
+    # Grad-CAM target: the post-ReLU, pre-pool map of block4 (8x8 at 64 px), like the
+    # post-activation maps used for resnet18 / efficientnet_b0. The ReLU is inplace, so the
+    # module's forward output IS the activated tensor (nothing modifies it afterwards). Until
+    # M6 step 0 this was "features.block4.conv" (pre-BN, pre-ReLU); see GRADCAM_VERSION.
+    TARGET_LAYER = "features.block4.relu"
 
     def __init__(
         self, num_classes: int, channels: Sequence[int] = (32, 64, 128, 256), dropout: float = 0.2

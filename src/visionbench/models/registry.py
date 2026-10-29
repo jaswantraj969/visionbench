@@ -18,7 +18,7 @@ from visionbench.models.small_cnn import SmallCNN
 MODEL_NAMES = ("majority_baseline", "small_cnn", "resnet18", "efficientnet_b0")
 TORCHVISION_MODELS = ("resnet18", "efficientnet_b0")
 DEFAULT_INPUT_SIZE = {"small_cnn": 64, "resnet18": 224, "efficientnet_b0": 224}
-# Grad-CAM target layers (metadata only until M5).
+# Grad-CAM target layers (post-activation feature maps; used by visionbench.explain.gradcam).
 TARGET_LAYERS = {
     "small_cnn": SmallCNN.TARGET_LAYER,
     "resnet18": "layer4",

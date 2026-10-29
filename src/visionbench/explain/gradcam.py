@@ -25,6 +25,9 @@ from torch import nn
 from visionbench.core.errors import VisionBenchError
 from visionbench.models.registry import TARGET_LAYERS
 
+# Bumped whenever a change can alter a CAM. History: "vb-gradcam-1" (M5) used small_cnn's
+# block4 conv output before BatchNorm and ReLU; "vb-gradcam-2" (M6 step 0) uses its post-ReLU map.
+GRADCAM_VERSION = "vb-gradcam-2"
 LIMITATIONS = (
     "Grad-CAM shows which regions of the final convolutional feature map most increased the "
     "score of the target class. It is coarse (feature-map resolution stated above), is not a "

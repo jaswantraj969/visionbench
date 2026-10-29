@@ -39,6 +39,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from visionbench.core.power import keep_awake
+
 # Run order fixed by the supervisor (VB-B1 budget decision); seeds 0, 1, 2 within each model.
 MODELS = (
     "majority_baseline",
@@ -78,15 +80,6 @@ def _stopped_reason(rec: dict[str, Any]) -> str:
     text = log.read_text(encoding="utf-8", errors="replace") if log and log.is_file() else ""
     m = STOPPED_RE.search(text)
     return m.group(1) if m else "unknown"
-
-
-def _keep_awake() -> None:
-    """Ask Windows not to sleep while this process runs (released when it exits)."""
-    if sys.platform == "win32":
-        import ctypes
-
-        es_continuous, es_system_required = 0x80000000, 0x00000001
-        ctypes.windll.kernel32.SetThreadExecutionState(es_continuous | es_system_required)
 
 
 def now() -> str:
@@ -160,7 +153,7 @@ class Benchmark:
     def train(self, only: list[str] | None = None) -> None:
         hashes = self.verify_hashes()
         self._mark_interrupted()
-        _keep_awake()
+        keep_awake()
         for model in MODELS:
             if only and model not in only:
                 continue

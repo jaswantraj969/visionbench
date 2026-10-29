@@ -56,6 +56,7 @@ from visionbench.evaluation.data import (
 )
 from visionbench.explain.geometry import ValGeometry
 from visionbench.explain.gradcam import (
+    GRADCAM_VERSION,
     LIMITATIONS,
     ExplanationNotSupported,
     grad_cam,
@@ -426,6 +427,7 @@ class InferenceService:
             ],
         )
         return self._common(lm, img, hit) | {
+            "gradcam_version": GRADCAM_VERSION,
             "target_class": lm.class_names[target],
             "target_probability": float(probs[target]),
             "predicted_class": lm.class_names[predicted],

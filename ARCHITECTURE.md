@@ -49,7 +49,7 @@ inside the API process (through `visionbench.inference`, see "Inference and Grad
 | `data.split` | implemented (M1–M2) | group-aware stratified splits (`vb-split-v2`), manifests, leakage check |
 | `models.registry` | implemented (M2) | `build_model()` → model, input size, normalization source, param counts, Grad-CAM target layer |
 | `models.baseline` | implemented (M2) | majority-class baseline (train priors; JSON) |
-| `models.small_cnn` | implemented (M2) | 4-block CNN, target layer `features.block4.conv` |
+| `models.small_cnn` | implemented (M2) | 4-block CNN, Grad-CAM target `features.block4.relu` (post-ReLU, pre-pool; since M6 step 0) |
 | `models.pretrained` | implemented (M2) | torchvision ImageNet weights via torch.hub into `VISIONBENCH_TORCH_HOME` (default `<data_root>/cache/torch`); sha256 check |
 | `training.config` | implemented (M2) | `TrainConfig` (Pydantic, YAML + dotted overrides) |
 | `training.data` | implemented (M2) | loader factory; **train/val only** (`select_entries`); `load_image` choke point |
@@ -321,7 +321,7 @@ test image are not detected. Val and train images are allowed and labelled in `n
 whose size differs from the training images gets an out-of-distribution warning.
 
 **Grad-CAM** (`explain.gradcam`). A forward hook on the registry's target layer (`small_cnn`
-`features.block4.conv`, `resnet18` `layer4`, `efficientnet_b0` `features.8`) captures the
+`features.block4.relu`, `resnet18` `layer4`, `efficientnet_b0` `features.8`, all post-activation maps) captures the
 activation A. The gradient of the target logit (pre-softmax) with respect to A is computed with
 `torch.autograd.grad`: the same gradient a backward hook sees, without writing `.grad` into the
 shared cached model (a test checks equality with a backward-hook implementation). Channel
@@ -345,7 +345,9 @@ cropped border markers, round trips).
 
 **Response** (gradcam): target and predicted class with probabilities, `cam.feature_map_size`
 and `resolution`, the normalised low-resolution CAM values, `geometry`, the overlay PNG as a
-base64 data URI, timings, warnings, notes, and the fixed `limitations` text. Shared overlays of
+base64 data URI, timings, warnings, notes, the fixed `limitations` text, and
+`gradcam_version` (`vb-gradcam-2` since M6 step 0, when small_cnn's target moved from the pre-BN
+conv output `features.block4.conv` to the post-ReLU map; `vb-gradcam-1` before). Shared overlays of
 dataset images need the dataset's attribution (DATASETS.md).
 
 ## Error schema

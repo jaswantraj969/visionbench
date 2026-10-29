@@ -35,7 +35,7 @@ from visionbench.models.small_cnn import SmallCNN
 SIZE = 64
 COLOURS = ((0.9, 0.1, 0.1), (0.1, 0.8, 0.1), (0.1, 0.2, 0.9))  # class = disk colour
 CLASSES = len(COLOURS)
-LAYER = SmallCNN.TARGET_LAYER  # "features.block4.conv": an 8x8 map for 64x64 input
+LAYER = SmallCNN.TARGET_LAYER  # "features.block4.relu": post-ReLU, pre-pool, 8x8 at 64 px
 QUADRANTS = ((0, 0), (0, 1), (1, 0), (1, 1))  # (row half, column half)
 
 
@@ -122,25 +122,49 @@ def test_localization_peak_in_the_disk_quadrant(quadrant_model, report_line) -> 
 
 
 def test_matches_an_independent_backward_hook_implementation(quadrant_model) -> None:
-    """Same CAM as the textbook version: backward hook + .backward() on a copy of the model."""
+    """Same CAM as the textbook version: a backward hook on the layer's output tensor plus
+    ``.backward()`` on a copy of the model. (A module ``register_full_backward_hook`` cannot be
+    used since M6 step 0: PyTorch forbids it on the inplace ReLU that is now the target.)"""
     for i in range(5):
         x, y = quadrant_model["x"][i : i + 1], int(quadrant_model["y"][i])
         model = copy.deepcopy(quadrant_model["model"])
         layer = dict(model.named_modules())[LAYER]
         seen: dict[str, torch.Tensor] = {}
-        h1 = layer.register_forward_hook(lambda _m, _i, out, s=seen: s.__setitem__("a", out))
-        h2 = layer.register_full_backward_hook(
-            lambda _m, _gi, go, s=seen: s.__setitem__("g", go[0])
-        )
+
+        def forward_hook(_m, _i, out, s=seen):
+            s["a"] = out
+            out.register_hook(lambda g, s=s: s.__setitem__("g", g))
+
+        h1 = layer.register_forward_hook(forward_hook)
         try:
             model(x)[0, y].backward()
         finally:
             h1.remove()
-            h2.remove()
         weights = seen["g"].mean(dim=(2, 3), keepdim=True)
         reference = torch.relu((weights * seen["a"]).sum(dim=1))[0].detach().double()
         ours = grad_cam(quadrant_model["model"], x, y, LAYER)
         assert torch.allclose(ours.cam, reference, rtol=1e-6, atol=1e-9)
+
+
+def test_small_cnn_target_is_the_post_relu_pre_pool_map(quadrant_model) -> None:
+    """The hooked tensor is ReLU(BN(conv(x))) of block4 (inplace ReLU), before the 2x2 pool."""
+    model, x = quadrant_model["model"], quadrant_model["x"][:1]
+    block4 = model.features.block4
+    seen: list[torch.Tensor] = []
+    handle = dict(model.named_modules())[LAYER].register_forward_hook(
+        lambda _m, _i, out: seen.append(out.detach().clone())
+    )
+    try:
+        with torch.no_grad():
+            model(x)
+            pre = model.features[:3](x)  # blocks 1-3
+            expected = torch.relu(block4.bn(block4.conv(pre)))
+    finally:
+        handle.remove()
+    assert seen[0].shape == (1, 256, 8, 8) and float(seen[0].min()) >= 0.0
+    assert torch.equal(seen[0], expected)
+    res = grad_cam(model, x, 0, LAYER)
+    assert res.feature_map_size == (8, 8)
 
 
 def test_target_sensitivity_cams_differ_between_classes(quadrant_model, report_line) -> None:

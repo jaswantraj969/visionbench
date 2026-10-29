@@ -28,6 +28,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from visionbench.core.power import keep_awake
+
 SEEDS_PER_MODEL = 3
 TRAINABLE = (
     "small_cnn_scratch_64",
@@ -122,6 +124,7 @@ def main() -> int:
     ap.add_argument("--det-steps", type=int, default=50)
     ap.add_argument("--timing-one", type=Path, help=argparse.SUPPRESS)
     args = ap.parse_args()
+    keep_awake()  # long run: do not let Windows sleep (M6 step 0c)
 
     if args.timing_one:  # child process
         print("PILOT_RESULT " + json.dumps(timing_one(args.timing_one)))

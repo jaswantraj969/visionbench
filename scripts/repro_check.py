@@ -30,6 +30,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from visionbench.core.power import keep_awake
+
 EXP_RE = re.compile(r"experiment (exp-\d{8}-\d{6}-[0-9a-f]{6}) running")
 TIMING_FIELDS = ("epoch_seconds",)
 
@@ -114,6 +116,7 @@ def main() -> int:
     ap.add_argument("--seed", type=int, required=True)
     ap.add_argument("--reference", required=True, help="benchmark experiment to reproduce")
     args = ap.parse_args()
+    keep_awake()  # long run: do not let Windows sleep (M6 step 0c)
 
     from visionbench.core.config import Settings
     from visionbench.tracking.store import DB_FILENAME, ExperimentStore
