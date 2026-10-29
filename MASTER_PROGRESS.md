@@ -83,12 +83,14 @@ Status values: todo / in progress / done / blocked.
 - **Freeze item (f):** the full suite is run again in both modes on the exact HEAD at C2,
   even though HEAD is a docs-only descendant of the tested 3677583.
 
+## VB-RELEASE (owner decisions: fix option (a), MIT license by Jaswant Raj, publish to GitHub)
+
+| step | status | commit | notes |
+|---|---|---|---|
+| S1 split-aware cache path + plan Amendment 1 + tag v1.0.0-rc2 | done | 28f97a7 | VAL cache moved to .../val/, 12/12 conditions = M6 hashes (48,600 files verified); plan sha256 ff41ad85…; Windows suite 360 passed / 1 skipped; Linux container skipped (Docker daemon not running); DB: 15 clean TEST (ids = test_runs.json), 0 robustness TEST |
+| S2 robustness TEST + check update | in progress | | |
+
 ## Next action
 
-**STOPPED in C3 (STOP condition 2).** Waiting for the owner's decision (REVIEW_PACKET top summary,
-"Owner decisions"). On resume:
-1. Run `python scripts/run_benchmark.py check benchmarks/eurosat-v1`. It must show **15**
-   clean TEST evaluations (one per run) and **0** robustness TEST evaluations. The assertion
-   failure is expected until C6.
-2. **Never repeat a clean TEST evaluation.** `evaluate-test` skips runs that have a TEST row.
-3. Apply only what the owner decided, then continue C3 from "materialize TEST pass 1".
+S2: materialize TEST twice, then `run_robustness.py --split test`. Never repeat a clean TEST
+evaluation (the drivers skip existing rows).
