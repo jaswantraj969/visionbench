@@ -13,6 +13,7 @@ from visionbench.api.deps import (
     EXPERIMENT_ID,
     JOB_ID,
     REPORT_ID,
+    ROBUSTNESS_ID,
     enqueue,
     experiment_store,
     job_store,
@@ -26,19 +27,21 @@ from visionbench.api.schemas import (
     JobAccepted,
     JobOut,
     LatencyRequest,
+    RobustnessRequest,
 )
 from visionbench.core.jsonio import read_json
 from visionbench.data.archive import cleanup_upload
 from visionbench.data.store import dataset_dir, load_dataset
 from visionbench.evaluation.compare import compare_experiments
 from visionbench.evaluation.data import check_test_reuse, checkpoint_name
-from visionbench.jobs.params import EvaluateParams, LatencyParams, TrainParams
+from visionbench.jobs.params import EvaluateParams, LatencyParams, RobustnessParams, TrainParams
 from visionbench.training.config import TrainConfig
 
 experiments = APIRouter(prefix="/api/experiments", tags=["experiments"])
 evaluations = APIRouter(prefix="/api/evaluations", tags=["evaluations"])
 comparisons = APIRouter(prefix="/api/comparisons", tags=["comparisons"])
 jobs = APIRouter(prefix="/api/jobs", tags=["jobs"])
+robustness = APIRouter(prefix="/api/robustness", tags=["robustness"])
 
 ExperimentId = PathParam(pattern=EXPERIMENT_ID)
 
@@ -146,6 +149,75 @@ def create_latency(
         )
     params = LatencyParams(experiment_id=experiment_id, **body.model_dump())
     return {"job": enqueue(settings, "latency", params)}
+
+
+@experiments.post("/{experiment_id}/robustness", status_code=202, response_model=JobAccepted)
+def create_robustness(
+    body: RobustnessRequest, request: Request, experiment_id: str = ExperimentId
+) -> dict[str, Any]:
+    """Queue a robustness evaluation on every condition of a suite (looked up by name). The
+    TEST-split lock (403), the suite (404) and the materialized conditions (409) are checked
+    here, and again in the worker."""
+    from visionbench.robustness.materialize import check_split_allowed, condition_dir
+    from visionbench.robustness.suite import find_suite
+
+    settings = settings_of(request)
+    check_split_allowed(body.split, settings)
+    with experiment_store(settings) as es:
+        exp = es.get(experiment_id)
+    if exp["status"] != "completed":
+        raise ApiError(
+            409,
+            "experiment_not_completed",
+            f"experiment {experiment_id} has status {exp['status']!r}",
+        )
+    suite = find_suite(body.suite, settings.robustness_suites_dir)
+    root = (
+        settings.data_dir("cache")
+        / "corruptions"
+        / exp["dataset_id"]
+        / exp["split_id"]
+        / suite.name
+    )
+    missing = [
+        c.key for c in suite.conditions if not (condition_dir(root, c) / "condition.json").is_file()
+    ]
+    if missing:
+        raise ApiError(
+            409,
+            "corruptions_not_materialized",
+            f"{len(missing)} condition(s) of {suite.name} are not materialized for "
+            f"{exp['dataset_id']}/{exp['split_id']}: {missing[:3]}",
+        )
+    params = RobustnessParams(
+        experiment_id=experiment_id,
+        suite=suite.name,
+        suite_sha256=suite.sha256,
+        **body.model_dump(exclude={"suite"}),
+    )
+    return {"job": enqueue(settings, "robustness", params)}
+
+
+@robustness.get("")
+def list_robustness(
+    request: Request,
+    experiment_id: str | None = Query(default=None, pattern=EXPERIMENT_ID),
+) -> list[dict[str, Any]]:
+    with experiment_store(settings_of(request)) as es:
+        return es.robustness_evaluations(experiment_id)
+
+
+@robustness.get("/{robustness_id}")
+def get_robustness(
+    request: Request, robustness_id: str = PathParam(pattern=ROBUSTNESS_ID)
+) -> dict[str, Any]:
+    settings = settings_of(request)
+    with experiment_store(settings) as es:
+        row = es.get_robustness(robustness_id)
+    return {
+        "robustness_evaluation": row,
+        "metrics": read_json(settings.resolved_data_root / row["metrics_path"]),
+    }
 
 
 @evaluations.get("")

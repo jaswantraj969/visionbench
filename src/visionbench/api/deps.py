@@ -14,8 +14,17 @@ from visionbench.tracking.store import DB_FILENAME, ExperimentStore
 
 EVAL_ID = r"^ev-\d{8}-\d{6}-[0-9a-f]{6}$"
 REPORT_ID = r"^rp-\d{8}-\d{6}-[0-9a-f]{6}$"
+ROBUSTNESS_ID = r"^rb-\d{8}-\d{6}-[0-9a-f]{6}$"
 JOB_ID = r"^job-\d{8}-\d{6}-[0-9a-f]{6}$"
-__all__ = ["DATASET_ID", "EVAL_ID", "EXPERIMENT_ID", "JOB_ID", "REPORT_ID", "SPLIT_ID"]
+__all__ = [
+    "DATASET_ID",
+    "EVAL_ID",
+    "EXPERIMENT_ID",
+    "JOB_ID",
+    "REPORT_ID",
+    "ROBUSTNESS_ID",
+    "SPLIT_ID",
+]
 
 PUBLIC_JOB_FIELDS = (
     "id",

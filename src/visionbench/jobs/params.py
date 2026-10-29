@@ -77,6 +77,15 @@ class LatencyParams(_Params):
     iterations: int = Field(default=50, ge=1, le=10_000)
 
 
+class RobustnessParams(_Params):
+    experiment_id: str = Field(pattern=EXPERIMENT_ID)
+    suite: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,63}$")
+    suite_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")  # as resolved when the job was queued
+    split: Literal["val", "test"]
+    clean_eval_id: str | None = Field(default=None, pattern=r"^ev-\d{8}-\d{6}-[0-9a-f]{6}$")
+    device: Literal["auto", "cpu", "cuda"] = "auto"
+
+
 PARAMS: dict[str, type[_Params]] = {
     "dataset_import": DatasetImportParams,
     "dataset_split": DatasetSplitParams,
@@ -84,6 +93,7 @@ PARAMS: dict[str, type[_Params]] = {
     "train": TrainParams,
     "evaluate": EvaluateParams,
     "latency": LatencyParams,
+    "robustness": RobustnessParams,
 }
 
 

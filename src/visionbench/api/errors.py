@@ -27,6 +27,11 @@ from visionbench.evaluation.data import EvaluationError, RepeatedTestEvaluationE
 from visionbench.explain.gradcam import ExplanationNotSupported
 from visionbench.inference.service import InferenceError
 from visionbench.jobs.store import QueueFullError
+from visionbench.robustness.suite import (
+    RobustnessError,
+    SuiteNotFoundError,
+    TestSplitLockedError,
+)
 from visionbench.tracking.store import NotFoundError, TrackingError
 from visionbench.training.config import ConfigError
 
@@ -67,6 +72,9 @@ def map_exception(exc: Exception) -> tuple[int, str]:
     table: list[tuple[type[Exception], int, str]] = [
         (RepeatedTestEvaluationError, 409, "test_reevaluation_requires_force"),
         (ExplanationNotSupported, 422, "explanation_not_supported"),
+        (TestSplitLockedError, 403, "test_split_locked"),
+        (SuiteNotFoundError, 404, "suite_not_found"),
+        (RobustnessError, 422, "robustness_invalid"),
         (QueueFullError, 429, "queue_full"),
         (DatasetNotFoundError, 404, "dataset_not_found"),
         (NotFoundError, 404, "not_found"),

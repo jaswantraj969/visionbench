@@ -188,6 +188,37 @@ def handle_latency(p: P.LatencyParams, ctx: JobContext) -> dict[str, Any]:
     return {"latency_id": r.latency_id, "experiment_id": r.experiment_id, "device": p.device}
 
 
+def handle_robustness(p: P.RobustnessParams, ctx: JobContext) -> dict[str, Any]:
+    from visionbench.robustness.evaluate import evaluate_robustness
+    from visionbench.robustness.suite import RobustnessError, find_suite
+
+    suite = find_suite(p.suite, ctx.settings.robustness_suites_dir)
+    if suite.sha256 != p.suite_sha256:
+        raise RobustnessError(f"suite {p.suite} changed since the job was queued")
+
+    def on_condition(done: int, total: int, key: str, status: str) -> None:
+        ctx.progress(conditions_done=done, conditions_total=total, last=key, last_status=status)
+        ctx.check_cancel()
+
+    outcomes = evaluate_robustness(
+        p.experiment_id,
+        suite,
+        p.split,
+        ctx.settings,
+        clean_eval_id=p.clean_eval_id,
+        device=p.device,
+        on_condition=on_condition,
+    )
+    return {
+        "experiment_id": p.experiment_id,
+        "suite": p.suite,
+        "split": p.split,
+        "robustness_ids": {o.key: o.robustness_id for o in outcomes},
+        "evaluated": sum(o.status == "evaluated" for o in outcomes),
+        "skipped": sum(o.status == "skipped" for o in outcomes),
+    }
+
+
 HANDLERS: dict[str, Callable[[Any, JobContext], dict[str, Any]]] = {
     "dataset_import": handle_dataset_import,
     "dataset_split": handle_dataset_split,
@@ -195,4 +226,5 @@ HANDLERS: dict[str, Callable[[Any, JobContext], dict[str, Any]]] = {
     "train": handle_train,
     "evaluate": handle_evaluate,
     "latency": handle_latency,
+    "robustness": handle_robustness,
 }

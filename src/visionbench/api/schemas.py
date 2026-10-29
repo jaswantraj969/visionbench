@@ -71,6 +71,13 @@ class EvaluationRequest(_Req):
     seed: int = Field(default=0, ge=0)
 
 
+class RobustnessRequest(_Req):
+    suite: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,63}$")
+    split: Literal["val", "test"]
+    clean_eval_id: str | None = Field(default=None, pattern=r"^ev-\d{8}-\d{6}-[0-9a-f]{6}$")
+    device: Literal["auto", "cpu", "cuda"] = "auto"
+
+
 class LatencyRequest(_Req):
     device: Literal["cpu", "cuda"]
     warmup: int = Field(default=10, ge=0, le=1000)

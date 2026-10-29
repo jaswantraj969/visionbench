@@ -43,6 +43,7 @@ JOB_KINDS = (
     "train",
     "evaluate",
     "latency",
+    "robustness",
 )
 JOB_STATUSES = ("queued", "running", "completed", "failed", "cancelled")
 TERMINAL = ("completed", "failed", "cancelled")

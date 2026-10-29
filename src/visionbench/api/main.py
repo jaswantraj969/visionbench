@@ -142,6 +142,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         experiments.evaluations,
         experiments.comparisons,
         experiments.jobs,
+        experiments.robustness,
     ):
         app.include_router(router)
     return app
