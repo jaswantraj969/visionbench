@@ -7,9 +7,10 @@ epoch_metrics, artifacts; v2 (M3) evaluations; v3 (M4 step 0) evaluations.forced
 latency_measurements; v4 (M4) jobs table (``visionbench.jobs.store``) and
 experiments.runner_pid; v5 (M4.1) process creation times next to every recorded pid
 (jobs.worker_create_time/child_create_time, experiments.runner_create_time; see
-:mod:`visionbench.core.process`); v6 (M5 step 0) experiments.stopped_reason. A stored version
-newer than this code is an error. Status transitions are enforced: pending -> running ->
-completed | failed | cancelled (pending may also go to failed/cancelled).
+:mod:`visionbench.core.process`); v6 (M5 step 0) experiments.stopped_reason; v7 (M6) the
+robustness_evaluations table (corrupted-input results, never mixed with ``evaluations``). A
+stored version newer than this code is an error. Status transitions are enforced: pending ->
+running -> completed | failed | cancelled (pending may also go to failed/cancelled).
 """
 
 from __future__ import annotations
@@ -39,7 +40,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 from visionbench.core.errors import VisionBenchError
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 # Columns added to tables after they were first created (older DBs get ALTER TABLE ADD COLUMN).
 _COLUMN_UPGRADES: dict[str, dict[str, str]] = {
     "evaluations": {"forced": "BOOLEAN NOT NULL DEFAULT 0", "reason": "TEXT"},
@@ -166,6 +167,26 @@ class LatencyMeasurement(Base):
     iterations: Mapped[int] = mapped_column(Integer)
     results_json: Mapped[str] = mapped_column(Text)  # {batch size: {median_ms, p95_ms, ...}}
     path: Mapped[str] = mapped_column(String(255))  # latency.json, relative to the data root
+    created_at: Mapped[str] = mapped_column(String(32))
+    visionbench_version: Mapped[str] = mapped_column(String(32))
+
+
+class RobustnessEvaluation(Base):
+    """One model x one corruption condition (M6). Separate from ``evaluations`` on purpose."""
+
+    __tablename__ = "robustness_evaluations"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    experiment_id: Mapped[str] = mapped_column(ForeignKey("experiments.id"), index=True)
+    split: Mapped[str] = mapped_column(String(8))  # "val" | "test"
+    checkpoint: Mapped[str] = mapped_column(String(16))  # "best" | "baseline"
+    suite: Mapped[str] = mapped_column(String(64))
+    suite_sha256: Mapped[str] = mapped_column(String(64))
+    corruption: Mapped[str] = mapped_column(String(32))
+    severity: Mapped[str] = mapped_column(String(16))
+    condition_hash: Mapped[str] = mapped_column(String(64))
+    clean_evaluation_id: Mapped[str] = mapped_column(ForeignKey("evaluations.id"))
+    metrics_path: Mapped[str] = mapped_column(String(255))  # relative to the data root
+    predictions_sha256: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[str] = mapped_column(String(32))
     visionbench_version: Mapped[str] = mapped_column(String(32))
 
@@ -424,6 +445,40 @@ class ExperimentStore:
             if checkpoint is not None:
                 q = q.where(Evaluation.checkpoint == checkpoint)
             return [_row(r) for r in s.scalars(q.order_by(Evaluation.created_at, _INSERTION_ORDER))]
+
+    # --- robustness (M6) -------------------------------------------------------------------
+
+    def add_robustness(self, **fields: Any) -> None:
+        with Session(self.engine) as s, s.begin():
+            self._get(s, fields["experiment_id"])
+            if s.get(Evaluation, fields["clean_evaluation_id"]) is None:
+                raise NotFoundError(f"clean evaluation {fields['clean_evaluation_id']} not found")
+            s.add(RobustnessEvaluation(created_at=utcnow(), **fields))
+
+    def get_robustness(self, rob_id: str) -> dict[str, Any]:
+        with Session(self.engine) as s:
+            row = s.get(RobustnessEvaluation, rob_id)
+            if row is None:
+                raise NotFoundError(f"robustness evaluation {rob_id} not found")
+            return _row(row)
+
+    def robustness_evaluations(
+        self,
+        experiment_id: str | None = None,
+        *,
+        split: str | None = None,
+        suite_sha256: str | None = None,
+    ) -> list[dict[str, Any]]:
+        with Session(self.engine) as s:
+            q = select(RobustnessEvaluation)
+            if experiment_id is not None:
+                q = q.where(RobustnessEvaluation.experiment_id == experiment_id)
+            if split is not None:
+                q = q.where(RobustnessEvaluation.split == split)
+            if suite_sha256 is not None:
+                q = q.where(RobustnessEvaluation.suite_sha256 == suite_sha256)
+            order = (RobustnessEvaluation.created_at, _INSERTION_ORDER)
+            return [_row(r) for r in s.scalars(q.order_by(*order))]
 
     # --- latency --------------------------------------------------------------------------
 

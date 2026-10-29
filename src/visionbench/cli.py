@@ -532,6 +532,73 @@ def _cmd_evaluations_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_robustness_materialize(args: argparse.Namespace) -> int:
+    from visionbench.robustness.materialize import materialize
+    from visionbench.robustness.suite import load_suite
+
+    suite = load_suite(args.suite)
+    results = materialize(
+        _settings(), args.dataset_id, args.split_id, suite, args.split, out_root=args.out
+    )
+    print(f"suite {suite.name} (sha256 {suite.sha256}) on {args.split.upper()}:")
+    for r in results:
+        print(f"  {r.key:22s} {r.status:8s} {r.images} images  condition {r.condition_hash}")
+    return 0
+
+
+def _cmd_robustness_evaluate(args: argparse.Namespace) -> int:
+    from visionbench.robustness.evaluate import evaluate_robustness
+    from visionbench.robustness.suite import load_suite
+
+    suite = load_suite(args.suite)
+    outcomes = evaluate_robustness(
+        args.experiment_id,
+        suite,
+        args.split,
+        _settings(),
+        clean_eval_id=args.clean_eval_id,
+        device=args.device,
+        batch_size=args.batch_size,
+        on_condition=lambda n, total, key, status: print(
+            f"  [{n}/{total}] {key}: {status}", flush=True
+        ),
+    )
+    done = sum(o.status == "evaluated" for o in outcomes)
+    print(
+        f"robustness {args.experiment_id} on {args.split.upper()}: {done} evaluated, "
+        f"{len(outcomes) - done} skipped (already evaluated)"
+    )
+    for o in outcomes:
+        print(f"  {o.key}: {o.robustness_id}")
+    return 0
+
+
+def _cmd_robustness_report(args: argparse.Namespace) -> int:
+    from visionbench.robustness.report import write_report
+    from visionbench.robustness.suite import load_suite
+
+    suite = load_suite(args.suite)
+    doc = write_report(_settings(), args.runs, suite, args.split, args.out)
+    print(f"wrote {args.out} and {args.out.with_suffix('.json')} ({doc['label']})")
+    if doc["missing"]:
+        print(f"  missing evaluations: {len(doc['missing'])}")
+    return 0
+
+
+def _cmd_robustness_list(args: argparse.Namespace) -> int:
+    with _open_store() as store:
+        rows = store.robustness_evaluations(args.experiment_id)
+    if not rows:
+        print("no robustness evaluations")
+    for r in rows:
+        print(
+            f"{r['id']}  {r['experiment_id']}  {r['split']}  {r['suite']}  "
+            f"{r['corruption']}/{r['severity']}  clean={r['clean_evaluation_id']}  "
+            f"{r['created_at']}"
+        )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     from visionbench import __version__
 
@@ -710,6 +777,35 @@ def build_parser() -> argparse.ArgumentParser:
     evl = evsub.add_parser("list", parents=[common], help="list evaluations")
     evl.add_argument("experiment_id", nargs="?")
     evl.set_defaults(func=_cmd_evaluations_list)
+
+    rob = sub.add_parser("robustness", parents=[common], help="corruption robustness (M6)")
+    robsub = rob.add_subparsers(dest="robustness_command", required=True)
+    rm = robsub.add_parser(
+        "materialize", parents=[common], help="write the corrupted images of every condition once"
+    )
+    rm.add_argument("dataset_id")
+    rm.add_argument("split_id")
+    rm.add_argument("--suite", type=Path, required=True, help="suite YAML")
+    rm.add_argument("--split", choices=["val", "test"], required=True)
+    rm.add_argument("--out", type=Path, help="other output root (default: the data-root cache)")
+    rm.set_defaults(func=_cmd_robustness_materialize)
+    re_ = robsub.add_parser("evaluate", parents=[common], help="evaluate a run on every condition")
+    re_.add_argument("experiment_id")
+    re_.add_argument("--suite", type=Path, required=True)
+    re_.add_argument("--split", choices=["val", "test"], required=True)
+    re_.add_argument("--clean-eval-id", help="pin the clean evaluation (default: latest)")
+    re_.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
+    re_.add_argument("--batch-size", type=int, default=64)
+    re_.set_defaults(func=_cmd_robustness_evaluate)
+    rr = robsub.add_parser("report", parents=[common], help="report over a benchmark's runs")
+    rr.add_argument("--runs", type=Path, required=True, help="runs.json of the benchmark")
+    rr.add_argument("--suite", type=Path, required=True)
+    rr.add_argument("--split", choices=["val", "test"], required=True)
+    rr.add_argument("--out", type=Path, required=True, help="Markdown path (JSON next to it)")
+    rr.set_defaults(func=_cmd_robustness_report)
+    rl = robsub.add_parser("list", parents=[common], help="list robustness evaluations")
+    rl.add_argument("experiment_id", nargs="?")
+    rl.set_defaults(func=_cmd_robustness_list)
     return parser
 
 

@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     inference_max_upload_mb: int = Field(default=10, ge=1)
     # TEST-split images cannot be sent to predict/gradcam until the final test evaluation (M8).
     test_images_unlocked: bool = False
+    # Robustness suites (M6) are looked up BY NAME under this directory (robustness_suite*.yaml);
+    # API clients never send paths.
+    robustness_suites_dir: Path = Path("benchmarks")
 
     @property
     def resolved_data_root(self) -> Path:
