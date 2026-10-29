@@ -1,6 +1,6 @@
 # Project Status
 
-_Last updated: 2026-10-29, end of M5 (prediction and Grad-CAM served from the API process; pending supervisor review)._
+_Last updated: 2026-10-29, end of M6 (robustness under fixed corruptions, VALIDATION only; pending supervisor review)._
 
 ## Current state
 - **M0:** foundation (config, seeding, env info, health/ready API).
@@ -85,9 +85,30 @@ _Last updated: 2026-10-29, end of M5 (prediction and Grad-CAM served from the AP
   - sanity checks: localization 75/75, target sensitivity mean r -0.606, model randomization
     mean |rho| 0.129, equality with a backward-hook reference, geometry against real
     transforms, no hook leaks.
-- There is no authentication, robustness suite, or frontend.
+- **M6 step 0**: SmallCNN Grad-CAM target moved to the post-ReLU, pre-pool block4 map
+  (`vb-gradcam-2`; benchmark logits bitwise unchanged; all-zero CAMs on the 20 demo images 1 -> 0);
+  cascading randomization on the four seed-0 EuroSAT models (report only, none flagged);
+  `core.power.keep_awake` in every long-running script.
+- **M6** (robustness, VALIDATION only):
+  - protocol `benchmarks/eurosat-v1/robustness/` (suite `eurosat-c-v1`: noise, blur, brightness,
+    JPEG x 3 fixed severities) committed and hashed before the first robustness evaluation;
+  - `visionbench.robustness`: deterministic corruptions, one-time materialization with hashed
+    condition manifests (reruns byte-identical: 48,600 PNGs), verified evaluation paired with
+    the pinned clean B1 evaluation, report; schema v7 `robustness_evaluations`; CLI, worker job
+    and API (test split locked);
+  - 15 runs x 12 conditions = 180 VAL robustness evaluations, all on the first attempt; report
+    `benchmarks/eurosat-v1/results/robustness_val.md`. Every number there is VALIDATION
+    (selection-biased), not test results;
+  - **0 test evaluations of any kind (clean or robustness) in the whole database.**
+- There is no authentication or frontend.
 
 ## Verified in session (2026-10-27, Windows 11, Python 3.11.15, torch 2.14.1+cu130, RTX 3050 6GB)
+- M6 (2026-10-29, after the last code change): `ruff check .` / `ruff format --check .` pass;
+  `pytest -q --cov=visionbench`: 338 passed and 1 skipped in 340.31 s, coverage 92 % (robustness modules 79-91 %); with `CUDA_VISIBLE_DEVICES=-1`: 338 passed and 1 skipped in 421.14 s.
+- M6 runs: materialization of the 12 VAL conditions re-verified byte for byte on the canonical
+  cache and reproduced in a fresh output root by a new process (48,600 identical PNGs); identity
+  check: the corrupted-image path reproduces every seed-0 model's clean predictions exactly;
+  majority baseline corrupted metrics equal clean metrics for all 36 run x condition pairs.
 - M5 (2026-10-29, after the last code change): `ruff check .` / `ruff format --check .` pass;
   `pytest -q --cov=visionbench`: 316 passed and 1 skipped in 630.53 s, coverage 94 %
   (`inference/service.py` 96 %, `explain/gradcam.py` 94 %, `explain/geometry.py` 97 %,
@@ -130,6 +151,9 @@ _Last updated: 2026-10-29, end of M5 (prediction and Grad-CAM served from the AP
   real `visionbench worker` recovery.
 
 ## Not verified
+- Robustness to anything except the four synthetic corruptions at their three severities; the
+  TEST split (M8). JPEG bytes depend on the Pillow / libjpeg build; materialization was
+  checked on this machine only.
 - The CI workflow has never run. The file-symlink test is skipped on this machine.
 - Linux/macOS process handling: psutil and the `fcntl.flock` branch of the worker lock were
   not run on POSIX.
@@ -149,7 +173,7 @@ _Last updated: 2026-10-29, end of M5 (prediction and Grad-CAM served from the AP
   low-information images, mostly SeaLake and Forest) cannot be checked by hashing.
 
 ## Blockers
-- None. M5 awaits supervisor review (REVIEW_PACKET.md).
+- None. M6 awaits supervisor review (REVIEW_PACKET.md).
 
 ## Next task
-M6 (per IMPLEMENTATION_PLAN.md): robustness suite. A frontend is not started.
+M7 (per IMPLEMENTATION_PLAN.md): frontend over the API. M8: the single final TEST evaluation (clean and robustness, all runs).

@@ -68,7 +68,12 @@ inside the API process (through `visionbench.inference`, see "Inference and Grad
 | `explain.overlay` | implemented (M5) | overlay PNG on the original image with "not seen by the model" marking and a legend |
 | `inference.service` | implemented (M5) | `InferenceService`: verified loading, LRU model cache, concurrency slots, inputs, test lock, predict / gradcam |
 | `api.routes.inference` | implemented (M5) | `POST /api/experiments/{id}/predict` and `/gradcam` (body read on the loop, model work in the thread pool) |
-| `robustness` | empty | M6: corruption benchmarks |
+| `robustness.suite` | implemented (M6) | suite YAML (corruptions x fixed severities), suite sha256, lookup by name, per-image seeds |
+| `robustness.corruptions` | implemented (M6) | gaussian_noise, gaussian_blur, brightness, jpeg as pure uint8 -> uint8 functions |
+| `robustness.materialize` | implemented (M6) | corrupted PNGs written once per condition with a hashed manifest; reruns prove byte identity; test lock |
+| `robustness.evaluate` | implemented (M6) | val-selected checkpoint on every verified condition, paired with the pinned clean evaluation; resumable |
+| `robustness.report` | implemented (M6) | per-model / per-condition report over a benchmark's `runs.json` (Markdown + JSON) |
+| `core.power` | implemented (M6 step 0) | `keep_awake()` for long-running scripts (Windows) |
 
 ## Data root layout
 
@@ -104,6 +109,8 @@ var/
       evaluations/<eval_id>/         (M3) ev-<YYYYMMDD-HHMMSS>-<6 hex>: metrics.json,
                                      predictions.csv, confusion_matrix.json, efficiency.json
       latency/<latency_id>/          (M4) lat-...: latency.json (one device per measurement)
+      robustness/<robustness_id>/    (M6) rb-...: metrics.json, predictions.csv (one corruption
+                                     condition; never mixed with evaluations/)
   db/visionbench.db                  (M2) SQLite experiments + jobs (WAL: also -wal, -shm)
   db/worker.lock                     (M4.1) OS-locked while a worker runs; content (pid, creation
                                      time of the last holder) is informational only
@@ -114,6 +121,9 @@ var/
   cache/norm_stats/<dataset_id>/<split_id>/norm_stats_train_<N>px.json
                                      (M3 step 0) train-only mean/std cache per resolution;
                                      split directories are never written after creation
+  cache/corruptions/<dataset_id>/<split_id>/<suite>/<corruption>/<severity>/
+                                     (M6) condition.json (hashed manifest) + <class>/<stem>.png;
+                                     written once (temp dir + rename), re-verified on rerun
   reports/<report_id>/               (M3) rp-...: comparison.json, comparison.md
   downloads/                         (D1) official dataset archives + their extraction
                                      (not managed by Settings; see DATASETS.md)
@@ -204,7 +214,7 @@ Notes:
 The majority baseline uses the same path but needs only labels. It fits train priors, scores the
 val labels, and writes `checkpoints/baseline.json`. It opens no images.
 
-### Database schema (`db/visionbench.db`, schema version 6)
+### Database schema (`db/visionbench.db`, schema version 7)
 
 | Table | Columns |
 |---|---|
@@ -214,12 +224,14 @@ val labels, and writes `checkpoints/baseline.json`. It opens no images.
 | `artifacts` | `id`, `experiment_id` (FK), `kind`, `relpath` (relative to data root), `sha256`, `size_bytes`, `created_at` |
 | `evaluations` (M3) | `id` (PK), `experiment_id` (FK), `split` (`val`\|`test`), `checkpoint` (`best`\|`last`\|`baseline`), `created_at`, `metrics_path`, `predictions_sha256`, `visionbench_version`, `forced`, `reason` (v3) |
 | `latency_measurements` (v3) | `id` (PK), `experiment_id` (FK), `checkpoint`, `device`, `device_name`, `torch_threads`, `input_size`, `warmup`, `iterations`, `results_json`, `path`, `created_at`, `visionbench_version` |
+| `robustness_evaluations` (v7) | `id` (PK, `rb-...`), `experiment_id` (FK), `split`, `checkpoint`, `suite`, `suite_sha256`, `corruption`, `severity`, `condition_hash`, `clean_evaluation_id` (FK → `evaluations`), `metrics_path`, `predictions_sha256`, `created_at`, `visionbench_version` |
 | `jobs` (v4) | `id` (PK), `kind`, `status`, `params_json`, `result_json`, `error`, `progress_json`, `cancel_requested`, `worker_pid`, `worker_create_time` (v5), `child_pid`, `child_create_time` (v5), `heartbeat_at`, `created_at`, `started_at`, `finished_at` |
 
 - Upgrades are additive only: `create_all` adds missing tables, and a fixed list of missing
   columns is added with `ALTER TABLE ... ADD COLUMN` (v3: `evaluations.forced/reason`; v4:
   `experiments.runner_pid`; v5: `experiments.runner_create_time`,
-  `jobs.worker_create_time/child_create_time`; v6: `experiments.stopped_reason`). v1 → … → v6
+  `jobs.worker_create_time/child_create_time`; v6: `experiments.stopped_reason`; v7: the
+  `robustness_evaluations` table). v1 → … → v7
   databases upgrade in place. Experiments completed before v6 were backfilled once from their
   own `train.log` (`scripts/backfill_stopped_reason.py`, which changes no other field). A stored
   version newer than the code is an error; there are no migrations (Alembic) yet.
@@ -349,6 +361,42 @@ base64 data URI, timings, warnings, notes, the fixed `limitations` text, and
 `gradcam_version` (`vb-gradcam-2` since M6 step 0, when small_cnn's target moved from the pre-BN
 conv output `features.block4.conv` to the post-ReLU map; `vb-gradcam-1` before). Shared overlays of
 dataset images need the dataset's attribution (DATASETS.md).
+
+## Robustness (M6)
+
+Pre-registered corruptions at fixed severities, evaluated identically for every model; the
+protocol for EuroSAT is `benchmarks/eurosat-v1/robustness/ROBUSTNESS_PROTOCOL.md`.
+
+- **Suite** (`robustness.suite`): a YAML file with `suite`, `base_seed` and corruptions x
+  severities; its sha256 identifies it. The API and the worker look suites up **by name** under
+  `VISIONBENCH_ROBUSTNESS_SUITES_DIR` (default `benchmarks`); clients never send paths.
+- **Corruptions** (`robustness.corruptions`): pure functions on the decoded original `uint8` RGB
+  image (noise, separable Gaussian blur with reflect padding, HSV-V brightness, Pillow JPEG
+  4:2:0), clipped and quantized back to `uint8`. Per-image seeds come from
+  `sha256("suite|corruption|severity|base_seed|relpath")`, so results do not depend on order,
+  batching, model or process.
+- **Materialization** (`robustness.materialize`): each condition is written once to
+  `cache/corruptions/...` as lossless PNG in a temp directory renamed into place (with retries:
+  Windows can briefly lock fresh files). `condition.json` records the suite hash, the split
+  manifest hash, library versions and, per image, the source and corrupted sha256; the condition
+  hash covers all of it. A rerun re-derives every image and compares bytes; it never rewrites.
+- **Evaluation** (`robustness.evaluate`): the val-selected checkpoint through the verified
+  evaluation path, its recorded val transform applied to the corrupted PNG. Before use, every
+  condition manifest and corrupted file is re-hashed. The clean reference is a pinned clean
+  evaluation of the same checkpoint and split; its `predictions.csv` must match its sha256 and
+  list the same images in the same order, so the paired bootstrap uses identical indices.
+  Results go only to `robustness_evaluations` + `<run_dir>/robustness/<id>/`. Conditions already
+  evaluated (same suite hash and condition hash) are skipped.
+- **Test lock:** materialization, evaluation, the report and the API refuse `split=test`
+  (`TestSplitLockedError`; API `403 test_split_locked`) unless
+  `VISIONBENCH_TEST_IMAGES_UNLOCKED=true` (M8).
+- **API / job:** `POST /api/experiments/{id}/robustness {suite, split}` checks the test lock,
+  that the experiment is completed (409), that the suite exists (404) and that every condition is
+  materialized (409 `corruptions_not_materialized`), then queues a `robustness` job (suite sha256
+  re-checked in the worker; progress per condition; cooperative cancel between conditions).
+  `GET /api/robustness?experiment_id=...` and `GET /api/robustness/{id}` read results.
+- **Report** (`robustness.report`): reads recorded results only; scope statement, confound flags
+  and the VAL label in every report; no model is called robust.
 
 ## Error schema
 

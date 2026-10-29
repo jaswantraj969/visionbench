@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased: M6 robustness under fixed corruptions, validation only (2026-10-29)
+
+### Added
+- `benchmarks/eurosat-v1/robustness/`: frozen `ROBUSTNESS_PROTOCOL.md`, `robustness_suite.yaml`
+  (`eurosat-c-v1`: gaussian_noise, gaussian_blur, brightness, jpeg x 3 severities),
+  `ROBUSTNESS_HASHES.txt`; `robustness_runs.json` (driver record).
+- `visionbench.robustness`: `suite` (YAML, sha256, lookup by name, per-image seeds), `corruptions`,
+  `materialize` (lossless PNGs + hashed condition manifests; reruns prove byte identity;
+  rename with retries on Windows), `evaluate` (verified checkpoint, pinned clean evaluation,
+  paired bootstrap, resumable), `report`.
+- Schema v7: `robustness_evaluations` (separate from `evaluations`).
+- CLI `visionbench robustness materialize|evaluate|report|list`; job kind `robustness`;
+  `POST /api/experiments/{id}/robustness`, `GET /api/robustness`, `GET /api/robustness/{id}`;
+  setting `robustness_suites_dir`.
+- `scripts/run_robustness.py` (resumable driver), `scripts/robustness_identity_check.py`,
+  `scripts/cascading_randomization.py`; `visionbench.core.power.keep_awake`.
+- Results: `benchmarks/eurosat-v1/results/robustness_val.md` / `.json`,
+  `gradcam_cascading_randomization.md`.
+- `run_benchmark.py check` also counts robustness evaluations and fails on any test evaluation
+  in the whole database.
+
+### Changed
+- SmallCNN Grad-CAM target `features.block4.conv` -> `features.block4.relu` (post-ReLU, pre-pool);
+  `GRADCAM_VERSION` `vb-gradcam-2` in every gradcam response. The reference test uses a tensor
+  backward hook (module full backward hooks are not allowed on an inplace ReLU).
+- `repro_check.py`, `pilot_benchmark.py` and `run_benchmark.py` keep Windows awake.
+
 ## Unreleased: M5 prediction and Grad-CAM in the API process (2026-10-28/29)
 
 ### Added

@@ -492,3 +492,32 @@ identical to the backward-hook reference. SmallCNN ends in global average poolin
 read position from padding effects at the borders; its evidence is not local. That design
 tested the architecture rather than the explanation and was replaced; the threshold was kept.
 Results are in REVIEW_PACKET.md.
+
+## 14. Robustness under fixed corruptions (implemented, M6)
+
+- **Pre-registration.** Each benchmark's corruption suite is frozen, hashed and committed before
+  any robustness evaluation (EuroSAT: `benchmarks/eurosat-v1/robustness/ROBUSTNESS_PROTOCOL.md`,
+  `robustness_suite.yaml`, `ROBUSTNESS_HASHES.txt`). Corruptions and severities are never tuned
+  on results; a change is a dated amendment and every affected evaluation is redone for all
+  runs.
+- **Method.** Corruptions are applied to the decoded original image, before each model's val
+  transform, with per-image seeds derived from the suite, condition and relpath. Each condition
+  is materialized once as lossless PNG and evaluated by every model from the same files;
+  reruns must be byte-identical and evaluation re-hashes every file.
+- **Pairing.** Each run's corrupted results are paired with its existing clean evaluation,
+  pinned by id; differences corrupted - clean use a paired percentile bootstrap on identical
+  image indices (1000 resamples, seed 0). Aggregates: mean corrupted balanced accuracy over all
+  conditions and per corruption, and the relative drop. No reference-model normalization.
+- **Storage separation.** Robustness results live in `robustness_evaluations` and
+  `<run_dir>/robustness/`; they are never written to `evaluations` and never mixed with clean
+  metrics or with test-use accounting of clean evaluations.
+- **Test policy.** Robustness on TEST happens exactly once, at M8, with the same suite, for all
+  runs, together with the clean test evaluation. Until then every robustness entry point refuses
+  `split=test` (403 in the API, an error in the CLI). No model, seed or checkpoint is chosen from
+  robustness results.
+- **Claims.** Results describe sensitivity to the listed corruptions only, never general
+  robustness. Differences are called distinguishable from zero only when their paired CI
+  excludes zero. Confounds (notably: pretrained models upsample 64 px inputs to 256 and crop
+  224, which smooths high-frequency corruptions) are stated with every report.
+- **Pipeline check.** The majority baseline ignores the image, so its corrupted metrics must
+  equal its clean metrics exactly.
