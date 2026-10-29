@@ -7,9 +7,14 @@
 - Resumable: conditions already evaluated are skipped by the library; a run whose process died
   is simply started again (recorded as a new attempt with the reason).
 - Writes ``robustness/robustness_runs.json`` (attempts, statuses, robustness ids, logs).
+- ``--split test`` (M8, after ``run_benchmark.py evaluate-test``): each run is paired with its
+  single clean TEST evaluation from ``results/test_runs.json``; the attempts go to
+  ``robustness/robustness_runs_test.json``; ``VISIONBENCH_TEST_IMAGES_UNLOCKED=true`` is set in
+  the evaluation processes only. The TEST conditions must be materialized first.
 
 Usage:
     python scripts/run_robustness.py benchmarks/eurosat-v1 --split val
+    python scripts/run_robustness.py benchmarks/eurosat-v1 --split test
 """
 
 from __future__ import annotations
@@ -17,6 +22,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -49,7 +55,7 @@ def verify_hashes(rdir: Path) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("protocol_dir", type=Path)
-    ap.add_argument("--split", choices=["val"], required=True)
+    ap.add_argument("--split", choices=["val", "test"], required=True)
     args = ap.parse_args()
     rdir = args.protocol_dir / "robustness"
     verify_hashes(rdir)
@@ -57,7 +63,23 @@ def main() -> int:
     suite = rdir / "robustness_suite.yaml"
     runs = json.loads((args.protocol_dir / "runs.json").read_text(encoding="utf-8"))["runs"]
     final = {(r["model"], r["seed"]): r for r in runs}
-    record_path = rdir / "robustness_runs.json"
+    clean_ids = {(r["model"], r["seed"]): r["val_eval_id"] for r in runs}
+    env = None
+    if args.split == "test":
+        # M8: pinned to each run's single clean TEST evaluation (results/test_runs.json);
+        # the TEST unlock is set in the evaluation processes only.
+        test_runs = json.loads(
+            (args.protocol_dir / "results" / "test_runs.json").read_text(encoding="utf-8")
+        )["runs"]
+        clean_ids = {
+            (a["model"], a["seed"]): a["test_eval_id"]
+            for a in test_runs
+            if a["status"] == "completed"
+        }
+        env = os.environ | {"VISIONBENCH_TEST_IMAGES_UNLOCKED": "true"}
+    record_path = rdir / (
+        "robustness_runs.json" if args.split == "val" else "robustness_runs_test.json"
+    )
     record: dict[str, Any] = (
         json.loads(record_path.read_text(encoding="utf-8"))
         if record_path.is_file()
@@ -89,7 +111,7 @@ def main() -> int:
                 "model": model,
                 "seed": seed,
                 "experiment_id": r["experiment_id"],
-                "clean_eval_id": r["val_eval_id"],
+                "clean_eval_id": clean_ids[(model, seed)],
                 "attempt": n,
                 "status": "in_progress",
                 "started_at": now(),
@@ -100,7 +122,7 @@ def main() -> int:
             print(f"[{attempt['started_at']}] {model} seed {seed} (attempt {n})", flush=True)
             cmd = [
                 "robustness", "evaluate", r["experiment_id"], "--suite", str(suite),
-                "--split", args.split, "--clean-eval-id", r["val_eval_id"],
+                "--split", args.split, "--clean-eval-id", clean_ids[(model, seed)],
                 "--device", "cpu" if model == "majority_baseline" else "cuda",
             ]  # fmt: skip
             with open(log, "w", encoding="utf-8") as f:
@@ -110,6 +132,7 @@ def main() -> int:
                     [sys.executable, "-m", "visionbench.cli", *cmd],
                     stdout=f,
                     stderr=subprocess.STDOUT,
+                    env=env,
                 ).returncode
             text = log.read_text(encoding="utf-8", errors="replace")
             attempt["finished_at"] = now()

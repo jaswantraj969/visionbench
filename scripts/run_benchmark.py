@@ -17,9 +17,26 @@ Subcommands (all take the protocol folder, e.g. ``benchmarks/eurosat-v1``):
   - While training, Windows is asked not to sleep (``SetThreadExecutionState``; process-scoped).
 - ``annotate <index> <text>``: add the known cause of an interruption to a ``runs.json`` entry.
 - ``evaluate-val``: evaluate each completed run's val-selected checkpoint on **VAL** (never test).
+- ``evaluate-test`` (M8, once): the single clean **TEST** evaluation of every run's val-selected
+  checkpoint, in protocol order.
+  - Refuses to start unless the protocol hashes and ``FINAL_ANALYSIS_PLAN.md`` (against
+    ``FINAL_ANALYSIS_PLAN_HASHES.txt``) verify.
+  - ``VISIONBENCH_TEST_IMAGES_UNLOCKED=true`` is set in the evaluation's process only.
+  - Attempts are recorded in ``results/test_runs.json`` (``runs.json`` stays frozen).
+  - A run that already has a TEST row in the database is never evaluated again; the row is
+    recorded instead.
+  - An attempt left ``in_progress`` with no row written (the driver or session died) is marked
+    ``interrupted`` and rerun with the identical command. Any failed evaluation stops the driver
+    for a human to judge; there is no automatic retry.
 - ``latency``: CPU and CUDA latency for seed 0 of each trainable model.
 - ``check``: assert that no evaluation with split=test exists for any benchmark or pilot
   experiment.
+- ``freeze-check`` (M8, before ``evaluate-test``): the automatable items of the freeze checklist.
+  - Hashes: the protocol, robustness and final-analysis-plan hashes verify.
+  - Zero TEST evaluations of any kind (``check``).
+  - ``dataset verify --full`` passes and the dataset fingerprint equals the protocol's.
+  - For each of the 15 runs, the val-selected checkpoint file, its artifact row and its VAL
+    evaluation record have the same sha256.
 - ``summary``: multi-seed VALIDATION summary (Markdown) built from the recorded val evaluations.
 
 ``runs.json`` holds experiment ids, statuses, timestamps and evaluation/latency ids only; logs go
@@ -31,6 +48,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import statistics
 import subprocess
@@ -131,7 +149,7 @@ class Benchmark:
             out[(r["model"], r["seed"])] = r
         return out
 
-    def cli(self, args: list[str], log: Path) -> tuple[int, str]:
+    def cli(self, args: list[str], log: Path, env: dict[str, str] | None = None) -> tuple[int, str]:
         """Run the CLI with output streamed to ``log`` (readable while it runs)."""
         with open(log, "w", encoding="utf-8") as f:
             f.write(f"> visionbench {' '.join(args)}\n")
@@ -140,6 +158,7 @@ class Benchmark:
                 [sys.executable, "-m", "visionbench.cli", *args],
                 stdout=f,
                 stderr=subprocess.STDOUT,
+                env=None if env is None else os.environ | env,
             ).returncode
         return code, log.read_text(encoding="utf-8", errors="replace")
 
@@ -269,6 +288,177 @@ class Benchmark:
                 raise SystemExit(f"val evaluation failed for {r['experiment_id']}:\n{out}")
             r["val_eval_id"] = m.group(1)
             self.save()
+
+    def verify_plan(self) -> str:
+        """sha256 of FINAL_ANALYSIS_PLAN.md, checked against FINAL_ANALYSIS_PLAN_HASHES.txt."""
+        plan = self.dir / "FINAL_ANALYSIS_PLAN.md"
+        hashes = self.dir / "FINAL_ANALYSIS_PLAN_HASHES.txt"
+        if not plan.is_file() or not hashes.is_file():
+            raise SystemExit(
+                "FINAL_ANALYSIS_PLAN.md and FINAL_ANALYSIS_PLAN_HASHES.txt must be committed"
+            )
+        for line in hashes.read_text(encoding="utf-8").splitlines():
+            if line and not line.startswith("#"):
+                digest, name = line.split(maxsplit=1)
+                actual = sha256(self.dir / name.lstrip("*"))
+                if actual != digest:
+                    raise SystemExit(f"{name}: sha256 {actual} != {digest}; refusing to run")
+        return sha256(plan)
+
+    def test_record_path(self) -> Path:
+        return self.dir / "results" / "test_runs.json"
+
+    def evaluate_test(self) -> None:
+        from visionbench.evaluation.compare import SELECTED_CHECKPOINTS
+
+        self.verify_hashes()
+        plan_sha = self.verify_plan()
+        keep_awake()
+        path = self.test_record_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        rec: dict[str, Any] = (
+            json.loads(path.read_text(encoding="utf-8"))
+            if path.is_file()
+            else {"benchmark": self.name, "split": "test", "label": "TEST", "runs": []}
+        )
+        rec["final_analysis_plan_sha256"] = plan_sha
+
+        def save() -> None:
+            tmp = path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(rec, indent=2) + "\n", encoding="utf-8", newline="\n")
+            tmp.replace(path)
+
+        final = self.final_runs()
+        for model in MODELS:
+            for seed in SEEDS:
+                r = final[(model, seed)]
+                if r["status"] != "completed":
+                    raise SystemExit(f"{model} seed {seed} is not completed; refusing to run")
+                exp = r["experiment_id"]
+                attempts = [a for a in rec["runs"] if a["experiment_id"] == exp]
+                with self.store() as es:
+                    rows = [
+                        e
+                        for e in es.evaluations(exp, split="test")
+                        if e["checkpoint"] in SELECTED_CHECKPOINTS
+                    ]
+                if len(rows) > 1:
+                    raise SystemExit(f"{exp} has {len(rows)} TEST evaluations; stop for review")
+                if rows:
+                    last = attempts[-1] if attempts else None
+                    if last is None or last["status"] != "completed":
+                        if last is not None:
+                            last["status"] = "completed"
+                            last["note"] = "row found in the database after the attempt"
+                        else:
+                            rec["runs"].append(
+                                {
+                                    "model": model,
+                                    "seed": seed,
+                                    "experiment_id": exp,
+                                    "attempt": 1,
+                                    "status": "completed",
+                                    "note": "row found in the database; not evaluated again",
+                                }
+                            )
+                            last = rec["runs"][-1]
+                        last["test_eval_id"] = rows[0]["id"]
+                        save()
+                    print(f"skip {model} seed {seed}: TEST evaluation {rows[0]['id']}", flush=True)
+                    continue
+                for a in attempts:
+                    if a["status"] == "in_progress":
+                        a["status"] = "interrupted"
+                        a["note"] = (
+                            "infrastructure interruption: the driver/session ended during this "
+                            "attempt and no evaluation row was written; rerun identically"
+                        )
+                if any(a["status"] == "failed" for a in attempts):
+                    raise SystemExit(f"{model} seed {seed} failed before; a human must decide")
+                device = "cpu" if model == "majority_baseline" else "cuda"
+                n = len(attempts) + 1
+                log = self.logs / f"eval_test_{model}_seed{seed}_attempt{n}.log"
+                attempt: dict[str, Any] = {
+                    "model": model,
+                    "seed": seed,
+                    "experiment_id": exp,
+                    "attempt": n,
+                    "device": device,
+                    "status": "in_progress",
+                    "started_at": now(),
+                    "log": _relative(log),
+                }
+                rec["runs"].append(attempt)
+                save()
+                print(f"[{now()}] evaluate {model} seed {seed} on TEST (attempt {n})", flush=True)
+                code, out = self.cli(
+                    ["evaluate", exp, "--split", "test", "--device", device],
+                    log,
+                    env={"VISIONBENCH_TEST_IMAGES_UNLOCKED": "true"},
+                )
+                attempt["finished_at"] = now()
+                attempt["exit_code"] = code
+                m = EVAL_RE.search(out)
+                if code != 0 or m is None:
+                    attempt["status"] = "failed"
+                    save()
+                    raise SystemExit(f"TEST evaluation failed for {exp} (see {log}); stop")
+                attempt["status"] = "completed"
+                attempt["test_eval_id"] = m.group(1)
+                save()
+                print(f"  -> {m.group(1)}", flush=True)
+
+    def freeze_check(self) -> None:
+        from visionbench.core.jsonio import read_json
+
+        failures: list[str] = []
+        self.verify_hashes()
+        print("b. protocol hashes: OK", flush=True)
+        rdir = self.dir / "robustness"
+        for line in (rdir / "ROBUSTNESS_HASHES.txt").read_text(encoding="utf-8").splitlines():
+            if line and not line.startswith("#"):
+                digest, name = line.split(maxsplit=1)
+                if sha256(rdir / name.lstrip("*")) != digest:
+                    failures.append(f"robustness hash mismatch: {name}")
+        print(f"b. final analysis plan sha256 {self.verify_plan()}: OK", flush=True)
+        self.check()
+        print("c. zero TEST evaluations (clean and robustness): OK", flush=True)
+        text = (self.dir / "BENCHMARK_PROTOCOL.md").read_text(encoding="utf-8")
+        ds_id = re.search(r"\| Dataset \| `(ds-[0-9a-f]{12})`", text).group(1)
+        frozen = re.search(r"\| Fingerprint \| `([0-9a-f]{64})`", text).group(1)
+        log = self.logs / "freeze_check_dataset_verify_full.log"
+        code, out = self.cli(["dataset", "verify", ds_id, "--full"], log)
+        record = read_json(self.settings.data_dir("datasets") / ds_id / "dataset.json")
+        if code != 0:
+            failures.append(f"dataset verify --full failed (see {log})")
+        if record["fingerprint"] != frozen:
+            failures.append(f"fingerprint {record['fingerprint']} != protocol {frozen}")
+        print(
+            f"d. dataset verify --full exit {code}; fingerprint "
+            f"{'matches' if record['fingerprint'] == frozen else 'DIFFERS'}",
+            flush=True,
+        )
+        root = self.settings.resolved_data_root
+        n_ok = 0
+        with self.store() as es:
+            for (model, seed), r in sorted(self.final_runs().items()):
+                exp = r["experiment_id"]
+                ckpt = read_json(root / es.get_evaluation(r["val_eval_id"])["metrics_path"])[
+                    "checkpoint"
+                ]
+                rel = f"experiments/{exp}/checkpoints/{ckpt['file']}"
+                rows = [a for a in es.artifacts(exp) if a["relpath"] == rel]
+                on_disk = sha256(root / rel) if (root / rel).is_file() else None
+                if len(rows) != 1 or not (rows[0]["sha256"] == on_disk == ckpt["sha256"]):
+                    failures.append(f"{model} seed {seed}: checkpoint {rel} sha256 mismatch")
+                else:
+                    n_ok += 1
+        print(f"e. val-selected checkpoints matching their artifact rows: {n_ok}/15", flush=True)
+        if n_ok != 15:
+            failures.append(f"only {n_ok}/15 checkpoints verified")
+        if failures:
+            raise SystemExit("FREEZE CHECK FAILED:\n- " + "\n- ".join(failures))
+        print("OK: freeze checklist items b-e pass (a, f, g are checked by hand)")
 
     def latency(self) -> None:
         for (model, seed), r in sorted(self.final_runs().items()):
@@ -437,7 +627,17 @@ class Benchmark:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument(
-        "command", choices=["train", "evaluate-val", "latency", "check", "summary", "annotate"]
+        "command",
+        choices=[
+            "train",
+            "evaluate-val",
+            "freeze-check",
+            "evaluate-test",
+            "latency",
+            "check",
+            "summary",
+            "annotate",
+        ],
     )
     ap.add_argument("protocol_dir", type=Path)
     ap.add_argument("--only", help="train: comma-separated model names")
@@ -453,6 +653,8 @@ def main() -> int:
         return 0
     {
         "evaluate-val": bench.evaluate_val,
+        "evaluate-test": bench.evaluate_test,
+        "freeze-check": bench.freeze_check,
         "latency": bench.latency,
         "check": bench.check,
         "summary": bench.summary,

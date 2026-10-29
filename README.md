@@ -632,7 +632,7 @@ py -3.11 -m venv .venv
 
 ```sh
 git archive HEAD | tar -x -C /tmp/vb-export
-docker run --rm -v /tmp/vb-export:/src:ro python:3.11-slim@sha256:673719e071ecf27434fd2635bbd8d00f49f4fdd81f243143438a42ced8bedf60 sh /src/scripts/linux_tests.sh
+docker run --rm -v /tmp/vb-export:/src:ro -v vb-pip-cache:/pip-cache python:3.11-slim@sha256:673719e071ecf27434fd2635bbd8d00f49f4fdd81f243143438a42ced8bedf60 sh /src/scripts/linux_tests.sh
 ```
 
 ### Frontend
@@ -693,6 +693,7 @@ and the Docker build.
 | pretrained training fails offline | ImageNet weights are downloaded on first use; pre-fill `VISIONBENCH_TORCH_HOME` or use `--allow-weight-fallback` |
 | GPU still used with `$env:CUDA_VISIBLE_DEVICES=""` | PowerShell deletes the variable; use `"-1"` |
 | Docker: `failed to connect to the docker API` | start Docker Desktop (or the Docker daemon) first |
+| Windows: `python -m venv` fails in `ensurepip` with `[WinError 3] The system cannot find the path specified` | the clone's path is too long for the 260-character limit (pip's own files are deeply nested); clone into a short path such as `C:\Users\<you>\vb`, or enable Windows long paths (admin) |
 
 ## Limitations
 

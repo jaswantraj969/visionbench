@@ -1,8 +1,10 @@
 """Robustness report over the runs of a benchmark (``runs.json``): Markdown + JSON.
 
 Reads recorded results only (no model is run). Every number is labelled
-"VALIDATION (selection-biased) — not test results" for split=val. No model is called robust; a
-difference is called distinguishable from zero only where its paired bootstrap CI excludes zero.
+"VALIDATION (selection-biased) — not test results" for split=val and "TEST" for split=test. On
+TEST the clean reference of each run is its single clean TEST evaluation of the val-selected
+checkpoint (more than one is an error). No model is called robust; a difference is called
+distinguishable from zero only where its paired bootstrap CI excludes zero.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from typing import Any
 
 from visionbench.core.config import Settings
 from visionbench.core.jsonio import read_json
+from visionbench.evaluation.compare import SELECTED_CHECKPOINTS
 from visionbench.robustness.suite import RobustnessError, Suite, TestSplitLockedError
 from visionbench.tracking.store import DB_FILENAME, ExperimentStore
 
@@ -47,6 +50,34 @@ CONFOUNDS = [
         "VAL chose each checkpoint; clean and corrupted VAL numbers share that bias.",
     ),
 ]
+TEST_SELECTION = (
+    "selection_bias",
+    "VAL chose each checkpoint; the TEST numbers chose nothing (one clean TEST evaluation per "
+    "run, following the committed final analysis plan).",
+)
+
+
+def confounds(split: str) -> list[tuple[str, str]]:
+    if split == "val":
+        return CONFOUNDS
+    return [
+        TEST_SELECTION if code == "selection_bias" else (code, text) for code, text in CONFOUNDS
+    ]
+
+
+def single_test_evaluation(store: ExperimentStore, experiment_id: str) -> str:
+    """The id of the one clean TEST evaluation of the val-selected checkpoint."""
+    rows = [
+        e
+        for e in store.evaluations(experiment_id, split="test")
+        if e["checkpoint"] in SELECTED_CHECKPOINTS
+    ]
+    if len(rows) != 1:
+        raise RobustnessError(
+            f"{experiment_id} has {len(rows)} clean TEST evaluations of the val-selected "
+            "checkpoint; exactly one is required"
+        )
+    return rows[0]["id"]
 
 
 def _ms(values: list[float]) -> str:
@@ -80,7 +111,7 @@ def collect(settings: Settings, runs_path: Path, suite: Suite, split: str) -> di
             if split == "val":
                 clean_id = r["val_eval_id"]
             else:
-                raise RobustnessError("test reports are produced at M8")
+                clean_id = single_test_evaluation(store, r["experiment_id"])
             clean = read_json(data_root / store.get_evaluation(clean_id)["metrics_path"])
             recorded = {
                 (x["corruption"], x["severity"]): x
@@ -171,7 +202,12 @@ def build_report(data: dict[str, Any], suite: Suite) -> tuple[str, dict[str, Any
         "",
         f"Suite `{suite.name}` (robustness_suite.yaml sha256 `{suite.sha256}`), 12 conditions, "
         "applied to the 64x64 originals before each model's val transform. Clean numbers are the "
-        "pinned B1 clean VAL evaluations; corrupted and clean predictions cover the same images. "
+        + (
+            "pinned B1 clean VAL evaluations"
+            if data["split"] == "val"
+            else "single clean TEST evaluation of each run"
+        )
+        + "; corrupted and clean predictions cover the same images. "
         "Drop = clean - corrupted balanced accuracy; relative drop = drop / clean. No reference-"
         "model normalization (this is not ImageNet-C's mCE). Mean ± sample sd over seeds 0/1/2.",
         "",
@@ -310,7 +346,7 @@ def build_report(data: dict[str, Any], suite: Suite) -> tuple[str, dict[str, Any
             "",
         ]
     lines += ["## Confounds", ""]
-    lines += [f"- **{code}**: {text}" for code, text in CONFOUNDS]
+    lines += [f"- **{code}**: {text}" for code, text in confounds(data["split"])]
     lines += [
         "",
         "## Runs",
@@ -325,7 +361,7 @@ def build_report(data: dict[str, Any], suite: Suite) -> tuple[str, dict[str, Any
     doc = {
         "label": label,
         "scope": SCOPE,
-        "confounds": dict(CONFOUNDS),
+        "confounds": dict(confounds(data["split"])),
         "suite": suite.name,
         "suite_sha256": suite.sha256,
         "split": data["split"],
