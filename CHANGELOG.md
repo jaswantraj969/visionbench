@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.0.0: M8 final TEST evaluation and release (2026-10-29)
+
+### Added
+- The single TEST evaluation of eurosat-v1: 15 clean TEST evaluations and 15 x 12 robustness
+  TEST evaluations; `results/FINAL_REPORT.md/.json` and `results/robustness_test.md/.json` from
+  `scripts/final_report.py`, as pre-registered in `FINAL_ANALYSIS_PLAN.md`.
+- Benchmark page TEST section; TEST images offered for a split only after its final evaluation.
+- `docs/screenshots/`, DEFINITION_OF_DONE.md, MIT LICENSE (Jaswant Raj), COMMIT_MAP.md.
+
+### Fixed
+- The corrupted-image cache path now includes the split name (FINAL_ANALYSIS_PLAN.md
+  amendment 1); the VAL cache was moved, not regenerated, and verified against the M6 hashes.
+- Sample-tile captions no longer overlap; `test_health` no longer depends on a built frontend.
+
+### Changed
+- `run_benchmark.py check`: after M8 it asserts 1 clean + 12 robustness TEST evaluations per
+  benchmark run and none elsewhere.
+- History rewritten before publishing (author identity, local paths); see COMMIT_MAP.md.
+
 ## 1.0.0-rc1: M7 frontend and release engineering (2026-10-29)
 
 TEST split still unevaluated. The single TEST evaluation (M8) follows

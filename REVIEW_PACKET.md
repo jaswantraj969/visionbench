@@ -1,3 +1,6 @@
+> **Commit hashes:** the history was rewritten before publishing (author identity, local paths).
+> Hashes cited below are the pre-rewrite ones; see [COMMIT_MAP.md](COMMIT_MAP.md).
+
 # Review Packet — VB-M6
 
 **Task:** VB-M6, "Robustness evaluation under fixed corruptions (validation only)".
