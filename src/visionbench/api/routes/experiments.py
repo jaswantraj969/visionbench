@@ -82,8 +82,12 @@ def create_experiment(config: TrainConfig, request: Request) -> dict[str, Any]:
 
 @experiments.get("")
 def list_experiments(request: Request) -> list[dict[str, Any]]:
-    with experiment_store(settings_of(request)) as es:
-        return [_summary(r) for r in es.list()]
+    from visionbench.benchmarks import experiment_tags
+
+    settings = settings_of(request)
+    tags = experiment_tags(settings.benchmarks_dir)
+    with experiment_store(settings) as es:
+        return [_summary(r) | {"tags": tags.get(r["id"], [])} for r in es.list()]
 
 
 @experiments.get("/{experiment_id}")
@@ -91,8 +95,11 @@ def get_experiment(request: Request, experiment_id: str = ExperimentId) -> dict[
     with experiment_store(settings_of(request)) as es:
         row = es.get(experiment_id)
         lat = es.latencies(experiment_id)
+        from visionbench.benchmarks import experiment_tags
+
         return {
             **_summary(row),
+            "tags": experiment_tags(settings_of(request).benchmarks_dir).get(experiment_id, []),
             "run_dir": row["run_dir"],
             "config": json.loads(row["config_json"]),
             # training settings as shown to people: "n/a" for those the model does not use

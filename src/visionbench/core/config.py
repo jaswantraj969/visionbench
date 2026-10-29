@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     # Robustness suites (M6) are looked up BY NAME under this directory (robustness_suite*.yaml);
     # API clients never send paths.
     robustness_suites_dir: Path = Path("benchmarks")
+    # Frozen benchmark folders (BENCHMARK_PROTOCOL.md, runs.json, results/), read-only (M7).
+    benchmarks_dir: Path = Path("benchmarks")
+    # Built frontend (M7): served by the API process from the same origin when it exists.
+    frontend_dist: Path = Path("frontend/dist")
 
     @property
     def resolved_data_root(self) -> Path:

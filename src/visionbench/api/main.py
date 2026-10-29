@@ -18,11 +18,12 @@ from __future__ import annotations
 import importlib
 import logging
 import tempfile
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from visionbench import __version__
@@ -133,9 +134,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 return err(503, "not_ready", reason)
         return response_class({"status": "ready", "checks": {"data_root": "ok", "torch": "ok"}})
 
-    from visionbench.api.routes import datasets, experiments, inference
+    from visionbench.api.routes import benchmarks, datasets, experiments, inference
 
     for router in (
+        benchmarks.router,
         datasets.router,
         experiments.experiments,
         inference.router,
@@ -145,7 +147,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         experiments.robustness,
     ):
         app.include_router(router)
+    _serve_frontend(app, settings, err)
     return app
+
+
+def _serve_frontend(app: FastAPI, settings: Settings, err: Any) -> None:
+    """Serve the built frontend (``frontend_dist``) from the same origin, with SPA fallback.
+
+    Registered after every API router, so API routes keep precedence; ``/api/...`` paths that
+    match no route still get the JSON 404. Files are only served from inside the dist folder.
+    The Host check and the client-header rule (middleware) apply to these responses too.
+    """
+    dist = settings.frontend_dist.expanduser().resolve()
+    index = dist / "index.html"
+    if not index.is_file():
+        return
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa(full_path: str) -> Any:
+        if full_path == "api" or full_path.startswith("api/"):
+            return err(404, "http_404", "Not Found")
+        candidate = (dist / full_path).resolve()
+        if full_path and dist in candidate.parents and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(index, headers={"Cache-Control": "no-cache"})
 
 
 app = create_app()

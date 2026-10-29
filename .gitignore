@@ -16,8 +16,13 @@ dist/
 *.pth
 *.ckpt
 
-# Frontend (later milestone)
+# Frontend
 node_modules/
+frontend/coverage/
+frontend/test-results/
+frontend/playwright-report/
+frontend/*.tsbuildinfo
+frontend/tsconfig*.tsbuildinfo
 
 # Secrets
 .env

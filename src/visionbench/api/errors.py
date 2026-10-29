@@ -14,6 +14,7 @@ from typing import Any
 
 from fastapi.responses import JSONResponse
 
+from visionbench.benchmarks import BenchmarkNotFoundError
 from visionbench.core.errors import (
     DatasetExistsError,
     DatasetNotFoundError,
@@ -77,6 +78,7 @@ def map_exception(exc: Exception) -> tuple[int, str]:
         (RobustnessError, 422, "robustness_invalid"),
         (QueueFullError, 429, "queue_full"),
         (DatasetNotFoundError, 404, "dataset_not_found"),
+        (BenchmarkNotFoundError, 404, "benchmark_not_found"),
         (NotFoundError, 404, "not_found"),
         (DatasetExistsError, 409, "dataset_exists"),
         (DatasetValidationError, 422, "dataset_invalid"),

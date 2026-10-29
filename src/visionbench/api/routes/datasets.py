@@ -16,6 +16,7 @@ from visionbench.api.schemas import (
     JobAccepted,
     PathImportRequest,
     SplitRequest,
+    SplitSample,
     VerifyRequest,
 )
 from visionbench.api.upload import receive_zip_upload
@@ -201,6 +202,71 @@ def get_split(
         "low_information_files": m["low_information_files"],
         "entries_total": len(m["entries"]),
     }
+
+
+SAMPLE_RULE = (
+    "numpy default_rng(seed); per_class entries of the split drawn without replacement from each "
+    "class's entries sorted by relpath"
+)
+
+
+@router.get("/{dataset_id}/splits/{split_id}/sample", response_model=SplitSample)
+def split_sample(
+    request: Request,
+    dataset_id: str = DatasetId,
+    split_id: str = SplitId,
+    split: str = Query(pattern="^(train|val|test)$"),
+    per_class: int = Query(default=2, ge=1, le=50),
+    seed: int = Query(default=0, ge=0, lt=2**32),
+) -> dict[str, Any]:
+    """A seeded, non-hand-picked sample of a split's images (for the image browser). TEST
+    images are not listed while the test split is locked (403 test_split_locked)."""
+    import numpy as np
+
+    settings = settings_of(request)
+    if split == "test" and not settings.test_images_unlocked:
+        raise ApiError(
+            403,
+            "test_split_locked",
+            "TEST images are locked until the final test evaluation "
+            "(VISIONBENCH_TEST_IMAGES_UNLOCKED)",
+        )
+    d = dataset_dir(settings.data_dir("datasets"), dataset_id) / "splits" / split_id
+    if not (d / "manifest.json").is_file():
+        raise ApiError(404, "split_not_found", f"split {split_id} not found")
+    manifest = read_json(d / "manifest.json")
+    rng = np.random.default_rng(seed)
+    images = []
+    for label in sorted(manifest["counts"]):
+        entries = sorted(
+            (e for e in manifest["entries"] if e["split"] == split and e["label"] == label),
+            key=lambda e: e["relpath"],
+        )
+        k = min(per_class, len(entries))
+        if k:
+            for i in sorted(rng.choice(len(entries), size=k, replace=False).tolist()):
+                images.append({"relpath": entries[i]["relpath"], "label": label, "split": split})
+    return {
+        "dataset_id": dataset_id,
+        "split_id": split_id,
+        "split": split,
+        "seed": seed,
+        "per_class": per_class,
+        "rule": SAMPLE_RULE,
+        "images": images,
+    }
+
+
+@router.get("/{dataset_id}/splits/{split_id}/audit")
+def split_audit(
+    request: Request, dataset_id: str = DatasetId, split_id: str = SplitId
+) -> dict[str, Any]:
+    """The D1 split audit (``audit.json``) if one was run; 404 otherwise."""
+    root = dataset_dir(settings_of(request).data_dir("datasets"), dataset_id)
+    path = root / "audits" / split_id / "audit.json"
+    if not path.is_file():
+        raise ApiError(404, "audit_not_found", f"no audit for split {split_id}")
+    return read_json(path)
 
 
 @router.post("/{dataset_id}/verify", status_code=202, response_model=JobAccepted)

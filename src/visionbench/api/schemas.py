@@ -107,3 +107,86 @@ class DatasetSummary(BaseModel):
     class_counts: dict[str, int]
     total_images: int
     fingerprint: str
+
+
+# --- read-only views for the frontend (M7) -------------------------------------------------
+
+
+class HashFile(BaseModel):
+    name: str
+    expected: str
+    actual: str | None
+    ok: bool
+
+
+class HashStatus(BaseModel):
+    present: bool
+    ok: bool
+    files: list[HashFile]
+
+
+class BenchmarkListItem(BaseModel):
+    name: str
+    protocol_hashes: HashStatus
+    robustness_hashes: HashStatus
+    runs: int
+
+
+class Overview(BaseModel):
+    version: str
+    datasets: int
+    experiments: int
+    experiments_by_status: dict[str, int]
+    jobs_by_status: dict[str, int]
+    test_images_unlocked: bool
+    inference_device: str
+    benchmarks: list[BenchmarkListItem]
+
+
+class BenchmarkDetail(BaseModel):
+    name: str
+    protocol_hashes: HashStatus
+    robustness_hashes: HashStatus
+    final_analysis_plan_hashes: HashStatus
+    documents: dict[str, bool]
+    runs: list[dict[str, Any]]
+    val_label: str
+    val_summary: list[dict[str, Any]]
+    robustness_val: dict[str, Any] | None
+    final_report: dict[str, Any] | None
+
+
+class BenchmarkDocument(BaseModel):
+    benchmark: str
+    document: str
+    path: str
+    markdown: str
+
+
+class SuiteCondition(BaseModel):
+    corruption: str
+    parameter: str
+    severity: str
+
+
+class SuiteOut(BaseModel):
+    name: str
+    sha256: str
+    base_seed: int
+    conditions: list[SuiteCondition]
+
+
+class SampleImage(BaseModel):
+    relpath: str
+    label: str
+    split: str
+
+
+class SplitSample(BaseModel):
+    dataset_id: str
+    split_id: str
+    split: str
+    seed: int
+    per_class: int
+    rule: str
+    images: list[SampleImage]
