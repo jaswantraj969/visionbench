@@ -99,6 +99,13 @@ CONSTRAINTS = (
         "smoothing of the corruption relative to the content.",
     ),
     (
+        "amendment_1",
+        "Final analysis plan amendment 1 (procedural): after the first TEST materialization pass "
+        "collided with the VAL cache, the corrupted-image cache path gained the split name. The "
+        "corruption bytes, the evaluation logic and this analysis are unchanged; no robustness "
+        "TEST result existed at the time, and the 15 clean TEST evaluations were not redone.",
+    ),
+    (
         "no_robustness_claim",
         "The robustness numbers describe sensitivity to 4 synthetic corruptions at 3 fixed "
         "severities only. No model is called robust.",

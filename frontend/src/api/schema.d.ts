@@ -902,6 +902,11 @@ export interface components {
             experiments_by_status: {
                 [key: string]: number;
             };
+            /**
+             * Final Test Splits
+             * @default []
+             */
+            final_test_splits: string[];
             /** Inference Device */
             inference_device: string;
             /** Jobs By Status */

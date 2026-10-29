@@ -139,6 +139,7 @@ class Overview(BaseModel):
     experiments_by_status: dict[str, int]
     jobs_by_status: dict[str, int]
     test_images_unlocked: bool
+    final_test_splits: list[str] = []
     inference_device: str
     benchmarks: list[BenchmarkListItem]
 

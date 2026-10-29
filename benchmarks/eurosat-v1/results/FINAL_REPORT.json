@@ -1,0 +1,1344 @@
+{
+  "benchmark": "eurosat-v1",
+  "label": "TEST",
+  "final_analysis_plan_sha256": "ff41ad85e0b95278805ad2e6653bf7c7a065d83d23b6fb622e72994bb2258a79",
+  "protocol_hashes": {
+    "BENCHMARK_PROTOCOL.md": "fa5e75ddd861c6b65b936768f4d5337604113b2da2d3a9d3d9105525f9a396aa",
+    "majority_baseline.yaml": "47515deda9b572ac3c4d98d4e3dcfaf9a3159ebd950a75e1e96000623a8358b3",
+    "small_cnn_scratch_64.yaml": "d8a8742720318a7a5d3711e92727c8eee08524e655ad7ed10243b71bcd5e7591",
+    "resnet18_imagenet_224.yaml": "646f051c7a2eecca29b8258ad3a166fdd3a6e163ad54c6e4d964d3b71c1ab01c",
+    "efficientnet_b0_imagenet_224.yaml": "9450023276820a8cdb843680cc3cc5b0dd98f542089b2d9e2b00ca1fb428f5fe",
+    "resnet18_scratch_64.yaml": "11599a26a4228047fae6a106e5531caccbe4c050d90b1f798979293095b5f823"
+  },
+  "bootstrap": {
+    "resamples": 1000,
+    "seed": 0,
+    "level": 0.95
+  },
+  "split": "test",
+  "models": {
+    "majority_baseline": {
+      "balanced_accuracy": {
+        "mean": 0.1,
+        "sd": 0.0,
+        "per_seed": [
+          0.1,
+          0.1,
+          0.1
+        ]
+      },
+      "macro_f1": {
+        "mean": 0.02,
+        "sd": 0.0,
+        "per_seed": [
+          0.02,
+          0.02,
+          0.02
+        ]
+      },
+      "val": {
+        "balanced_accuracy": {
+          "mean": 0.1,
+          "sd": 0.0,
+          "per_seed": [
+            0.1,
+            0.1,
+            0.1
+          ]
+        },
+        "macro_f1": {
+          "mean": 0.02,
+          "sd": 0.0,
+          "per_seed": [
+            0.02,
+            0.02,
+            0.02
+          ]
+        }
+      }
+    },
+    "resnet18_scratch_64": {
+      "balanced_accuracy": {
+        "mean": 0.9133185185185184,
+        "sd": 0.04566672794444842,
+        "per_seed": [
+          0.9241111111111111,
+          0.8632222222222221,
+          0.9526222222222221
+        ]
+      },
+      "macro_f1": {
+        "mean": 0.9137340198580418,
+        "sd": 0.04547514086969912,
+        "per_seed": [
+          0.9247365998412992,
+          0.8637670592608437,
+          0.9526984004719825
+        ]
+      },
+      "val": {
+        "balanced_accuracy": {
+          "mean": 0.9125333333333333,
+          "sd": 0.048453495586674666,
+          "per_seed": [
+            0.9299555555555555,
+            0.8577777777777778,
+            0.9498666666666666
+          ]
+        },
+        "macro_f1": {
+          "mean": 0.9127266732517599,
+          "sd": 0.04884572866809588,
+          "per_seed": [
+            0.9304632933634724,
+            0.857490654180072,
+            0.9502260722117354
+          ]
+        }
+      }
+    },
+    "small_cnn_scratch_64": {
+      "balanced_accuracy": {
+        "mean": 0.9561407407407407,
+        "sd": 0.0027199612681823005,
+        "per_seed": [
+          0.9577111111111112,
+          0.953,
+          0.9577111111111112
+        ]
+      },
+      "macro_f1": {
+        "mean": 0.9570495856853352,
+        "sd": 0.0027245909747597987,
+        "per_seed": [
+          0.9586076967420439,
+          0.9539035461200756,
+          0.9586375141938859
+        ]
+      },
+      "val": {
+        "balanced_accuracy": {
+          "mean": 0.9556148148148148,
+          "sd": 0.0027473294178241197,
+          "per_seed": [
+            0.958777777777778,
+            0.9542444444444443,
+            0.9538222222222222
+          ]
+        },
+        "macro_f1": {
+          "mean": 0.9562945190382864,
+          "sd": 0.0029024695668163503,
+          "per_seed": [
+            0.9596432087090558,
+            0.9547386550155114,
+            0.954501693390292
+          ]
+        }
+      }
+    },
+    "resnet18_imagenet_224": {
+      "balanced_accuracy": {
+        "mean": 0.9836444444444444,
+        "sd": 0.0032741411087489586,
+        "per_seed": [
+          0.9844444444444445,
+          0.9800444444444445,
+          0.9864444444444445
+        ]
+      },
+      "macro_f1": {
+        "mean": 0.9839182594797685,
+        "sd": 0.0032052900724194,
+        "per_seed": [
+          0.9848038262959055,
+          0.98036328825459,
+          0.98658766388881
+        ]
+      },
+      "val": {
+        "balanced_accuracy": {
+          "mean": 0.9861777777777777,
+          "sd": 0.003462889680349598,
+          "per_seed": [
+            0.9868666666666666,
+            0.9824222222222222,
+            0.9892444444444445
+          ]
+        },
+        "macro_f1": {
+          "mean": 0.9864050246371218,
+          "sd": 0.0035711261999860837,
+          "per_seed": [
+            0.9873350935206713,
+            0.982460885247215,
+            0.989419095143479
+          ]
+        }
+      }
+    },
+    "efficientnet_b0_imagenet_224": {
+      "balanced_accuracy": {
+        "mean": 0.9843629629629629,
+        "sd": 0.0014114756018031914,
+        "per_seed": [
+          0.9843999999999999,
+          0.9829333333333332,
+          0.9857555555555555
+        ]
+      },
+      "macro_f1": {
+        "mean": 0.984585639433623,
+        "sd": 0.0014815241414872628,
+        "per_seed": [
+          0.9847681637634773,
+          0.9830213099132881,
+          0.9859674446241036
+        ]
+      },
+      "val": {
+        "balanced_accuracy": {
+          "mean": 0.9870518518518518,
+          "sd": 0.0027102305795333845,
+          "per_seed": [
+            0.9840000000000002,
+            0.9891777777777777,
+            0.9879777777777777
+          ]
+        },
+        "macro_f1": {
+          "mean": 0.987273662415857,
+          "sd": 0.0025586897985162057,
+          "per_seed": [
+            0.9843769089956698,
+            0.9892255351060797,
+            0.9882185431458215
+          ]
+        }
+      }
+    }
+  },
+  "ranking": [
+    {
+      "model": "efficientnet_b0_imagenet_224",
+      "rank": 1,
+      "rank_group": 1
+    },
+    {
+      "model": "resnet18_imagenet_224",
+      "rank": 2,
+      "rank_group": 1
+    },
+    {
+      "model": "small_cnn_scratch_64",
+      "rank": 3,
+      "rank_group": 2
+    },
+    {
+      "model": "resnet18_scratch_64",
+      "rank": 4,
+      "rank_group": 2
+    },
+    {
+      "model": "majority_baseline",
+      "rank": 5,
+      "rank_group": 3
+    }
+  ],
+  "neighbours": [
+    {
+      "higher": "efficientnet_b0_imagenet_224",
+      "lower": "resnet18_imagenet_224",
+      "separated": false,
+      "a": "efficientnet_b0_imagenet_224",
+      "b": "resnet18_imagenet_224",
+      "per_seed": {
+        "0": {
+          "balanced_accuracy": {
+            "point": -4.4444444444513564e-05,
+            "low": -0.004065635125868224,
+            "high": 0.0039345030614638815,
+            "resamples_defined": 1000
+          },
+          "macro_f1": {
+            "point": -3.5662532428148985e-05,
+            "low": -0.003907233213806896,
+            "high": 0.00391527757501163,
+            "resamples_defined": 1000
+          }
+        },
+        "1": {
+          "balanced_accuracy": {
+            "point": 0.0028888888888887188,
+            "low": -0.0009876719182977107,
+            "high": 0.007135680316335843,
+            "resamples_defined": 1000
+          },
+          "macro_f1": {
+            "point": 0.0026580216586981065,
+            "low": -0.00108223521939115,
+            "high": 0.00671755221744833,
+            "resamples_defined": 1000
+          }
+        },
+        "2": {
+          "balanced_accuracy": {
+            "point": -0.000688888888888961,
+            "low": -0.004244288672656733,
+            "high": 0.002978964820246956,
+            "resamples_defined": 1000
+          },
+          "macro_f1": {
+            "point": -0.0006202192647064564,
+            "low": -0.0041421759520417515,
+            "high": 0.0031626412631066293,
+            "resamples_defined": 1000
+          }
+        }
+      },
+      "verdict": {
+        "balanced_accuracy": "not distinguishable",
+        "macro_f1": "not distinguishable"
+      }
+    },
+    {
+      "higher": "resnet18_imagenet_224",
+      "lower": "small_cnn_scratch_64",
+      "separated": true,
+      "a": "resnet18_imagenet_224",
+      "b": "small_cnn_scratch_64",
+      "per_seed": {
+        "0": {
+          "balanced_accuracy": {
+            "point": 0.026733333333333276,
+            "low": 0.02009814808453136,
+            "high": 0.03296695532728175,
+            "resamples_defined": 1000
+          },
+          "macro_f1": {
+            "point": 0.026196129553861525,
+            "low": 0.019477476811593095,
+            "high": 0.032278082436106886,
+            "resamples_defined": 1000
+          }
+        },
+        "1": {
+          "balanced_accuracy": {
+            "point": 0.027044444444444538,
+            "low": 0.020362433967099657,
+            "high": 0.034554070240954186,
+            "resamples_defined": 1000
+          },
+          "macro_f1": {
+            "point": 0.026459742134514408,
+            "low": 0.019892168696025576,
+            "high": 0.034067024620932,
+            "resamples_defined": 1000
+          }
+        },
+        "2": {
+          "balanced_accuracy": {
+            "point": 0.028733333333333277,
+            "low": 0.021717911404453734,
+            "high": 0.03501273960259165,
+            "resamples_defined": 1000
+          },
+          "macro_f1": {
+            "point": 0.027950149694924153,
+            "low": 0.021214557631487812,
+            "high": 0.03430172029474922,
+            "resamples_defined": 1000
+          }
+        }
+      },
+      "verdict": {
+        "balanced_accuracy": "distinguishable: resnet18_imagenet_224 > small_cnn_scratch_64",
+        "macro_f1": "distinguishable: resnet18_imagenet_224 > small_cnn_scratch_64"
+      }
+    },
+    {
+      "higher": "small_cnn_scratch_64",
+      "lower": "resnet18_scratch_64",
+      "separated": false,
+      "a": "small_cnn_scratch_64",
+      "b": "resnet18_scratch_64",
+      "per_seed": {
+        "0": {
+          "balanced_accuracy": {
+            "point": 0.033600000000000074,
+            "low": 0.026201065996844457,
+            "high": 0.041240940041701424,
+            "resamples_defined": 1000
+          },
+          "macro_f1": {
+            "point": 0.033871096900744746,
+            "low": 0.02653136086977291,
+            "high": 0.04161861585197576,
+            "resamples_defined": 1000
+          }
+        },
+        "1": {
+          "balanced_accuracy": {
+            "point": 0.08977777777777785,
+            "low": 0.07931421788072812,
+            "high": 0.09993333454984524,
+            "resamples_defined": 1000
+          },
+          "macro_f1": {
+            "point": 0.09013648685923181,
+            "low": 0.0796515970487057,
+            "high": 0.10030146101991483,
+            "resamples_defined": 1000
+          }
+        },
+        "2": {
+          "balanced_accuracy": {
+            "point": 0.005088888888889032,
+            "low": -0.0014454127207308113,
+            "high": 0.012181988794098946,
+            "resamples_defined": 1000
+          },
+          "macro_f1": {
+            "point": 0.005939113721903366,
+            "low": -0.0005443353001737804,
+            "high": 0.012775512748186184,
+            "resamples_defined": 1000
+          }
+        }
+      },
+      "verdict": {
+        "balanced_accuracy": "not distinguishable",
+        "macro_f1": "not distinguishable"
+      }
+    },
+    {
+      "higher": "resnet18_scratch_64",
+      "lower": "majority_baseline",
+      "separated": true,
+      "a": "resnet18_scratch_64",
+      "b": "majority_baseline",
+      "per_seed": {
+        "0": {
+          "balanced_accuracy": {
+            "point": 0.8241111111111111,
+            "low": 0.8156746918663839,
+            "high": 0.8318088647081289,
+            "resamples_defined": 1000
+          },
+          "macro_f1": {
+            "point": 0.9047365998412992,
+            "low": 0.8962181402664668,
+            "high": 0.9122437018681364,
+            "resamples_defined": 1000
+          }
+        },
+        "1": {
+          "balanced_accuracy": {
+            "point": 0.7632222222222221,
+            "low": 0.7532822456165653,
+            "high": 0.7735951912531205,
+            "resamples_defined": 1000
+          },
+          "macro_f1": {
+            "point": 0.8437670592608437,
+            "low": 0.8335644685988438,
+            "high": 0.8543460245934883,
+            "resamples_defined": 1000
+          }
+        },
+        "2": {
+          "balanced_accuracy": {
+            "point": 0.8526222222222222,
+            "low": 0.845413818557119,
+            "high": 0.8592307011448871,
+            "resamples_defined": 1000
+          },
+          "macro_f1": {
+            "point": 0.9326984004719825,
+            "low": 0.9255096832182795,
+            "high": 0.9394305220117128,
+            "resamples_defined": 1000
+          }
+        }
+      },
+      "verdict": {
+        "balanced_accuracy": "distinguishable: resnet18_scratch_64 > majority_baseline",
+        "macro_f1": "distinguishable: resnet18_scratch_64 > majority_baseline"
+      }
+    }
+  ],
+  "comparisons": [
+    {
+      "a": "efficientnet_b0_imagenet_224",
+      "b": "resnet18_imagenet_224",
+      "per_seed": {
+        "0": {
+          "balanced_accuracy": {
+            "point": -4.4444444444513564e-05,
+            "low": -0.004065635125868224,
+            "high": 0.0039345030614638815,
+            "resamples_defined": 1000
+          },
+          "macro_f1": {
+            "point": -3.5662532428148985e-05,
+            "low": -0.003907233213806896,
+            "high": 0.00391527757501163,
+            "resamples_defined": 1000
+          }
+        },
+        "1": {
+          "balanced_accuracy": {
+            "point": 0.0028888888888887188,
+            "low": -0.0009876719182977107,
+            "high": 0.007135680316335843,
+            "resamples_defined": 1000
+          },
+          "macro_f1": {
+            "point": 0.0026580216586981065,
+            "low": -0.00108223521939115,
+            "high": 0.00671755221744833,
+            "resamples_defined": 1000
+          }
+        },
+        "2": {
+          "balanced_accuracy": {
+            "point": -0.000688888888888961,
+            "low": -0.004244288672656733,
+            "high": 0.002978964820246956,
+            "resamples_defined": 1000
+          },
+          "macro_f1": {
+            "point": -0.0006202192647064564,
+            "low": -0.0041421759520417515,
+            "high": 0.0031626412631066293,
+            "resamples_defined": 1000
+          }
+        }
+      },
+      "verdict": {
+        "balanced_accuracy": "not distinguishable",
+        "macro_f1": "not distinguishable"
+      }
+    },
+    {
+      "a": "small_cnn_scratch_64",
+      "b": "resnet18_scratch_64",
+      "per_seed": {
+        "0": {
+          "balanced_accuracy": {
+            "point": 0.033600000000000074,
+            "low": 0.026201065996844457,
+            "high": 0.041240940041701424,
+            "resamples_defined": 1000
+          },
+          "macro_f1": {
+            "point": 0.033871096900744746,
+            "low": 0.02653136086977291,
+            "high": 0.04161861585197576,
+            "resamples_defined": 1000
+          }
+        },
+        "1": {
+          "balanced_accuracy": {
+            "point": 0.08977777777777785,
+            "low": 0.07931421788072812,
+            "high": 0.09993333454984524,
+            "resamples_defined": 1000
+          },
+          "macro_f1": {
+            "point": 0.09013648685923181,
+            "low": 0.0796515970487057,
+            "high": 0.10030146101991483,
+            "resamples_defined": 1000
+          }
+        },
+        "2": {
+          "balanced_accuracy": {
+            "point": 0.005088888888889032,
+            "low": -0.0014454127207308113,
+            "high": 0.012181988794098946,
+            "resamples_defined": 1000
+          },
+          "macro_f1": {
+            "point": 0.005939113721903366,
+            "low": -0.0005443353001737804,
+            "high": 0.012775512748186184,
+            "resamples_defined": 1000
+          }
+        }
+      },
+      "verdict": {
+        "balanced_accuracy": "not distinguishable",
+        "macro_f1": "not distinguishable"
+      }
+    },
+    {
+      "a": "resnet18_imagenet_224",
+      "b": "resnet18_scratch_64",
+      "per_seed": {
+        "0": {
+          "balanced_accuracy": {
+            "point": 0.06033333333333335,
+            "low": 0.05243637434347478,
+            "high": 0.06870002823910784,
+            "resamples_defined": 1000
+          },
+          "macro_f1": {
+            "point": 0.06006722645460627,
+            "low": 0.05224183367386211,
+            "high": 0.06839958726476578,
+            "resamples_defined": 1000
+          }
+        },
+        "1": {
+          "balanced_accuracy": {
+            "point": 0.11682222222222238,
+            "low": 0.10582730137139991,
+            "high": 0.12733650901494098,
+            "resamples_defined": 1000
+          },
+          "macro_f1": {
+            "point": 0.11659622899374622,
+            "low": 0.10570802639280065,
+            "high": 0.1270688700518307,
+            "resamples_defined": 1000
+          }
+        },
+        "2": {
+          "balanced_accuracy": {
+            "point": 0.03382222222222231,
+            "low": 0.02677989986082742,
+            "high": 0.04104102785066669,
+            "resamples_defined": 1000
+          },
+          "macro_f1": {
+            "point": 0.03388926341682752,
+            "low": 0.02696973900908243,
+            "high": 0.041210516383474415,
+            "resamples_defined": 1000
+          }
+        }
+      },
+      "verdict": {
+        "balanced_accuracy": "distinguishable: resnet18_imagenet_224 > resnet18_scratch_64",
+        "macro_f1": "distinguishable: resnet18_imagenet_224 > resnet18_scratch_64"
+      }
+    }
+  ],
+  "constraints": {
+    "epoch_cap": "Every trainable run had a fixed epoch cap (25) and early stopping on validation loss; several runs stopped at the cap. The numbers describe these training budgets, not each architecture's best achievable accuracy.",
+    "untuned_learning_rates": "Learning rates and other hyperparameters were fixed in the protocol, not tuned per model. A different setting could change any ranking.",
+    "single_split": "One fixed train/val/test split of one dataset: no split-to-split variance is included, and nothing here generalises beyond EuroSAT RGB.",
+    "three_seeds": "n = 3 seeds per model: the seed sd is itself very uncertain, and the seed-matched comparison rule is strict by design.",
+    "low_information_classes": "Many SeaLake (about 78 %) and Forest (about 34 %) tiles are near-uniform; their near-duplicates cannot be detected by hashing, so leakage for those classes is bounded less tightly (DATASETS.md).",
+    "resolution_pretraining_confound": "The two ImageNet-pretrained models use 224 px inputs (upsampled from 64 px) and the scratch models 64 px: pretraining and input resolution are confounded, so a difference between the groups has no attributed cause.",
+    "corruption_scaling": "Corruptions are applied at 64 px before each model's transform; for the 224 px models the corruption is upsampled with the content (a 1 px blur becomes about 4 px; robustness protocol amendment 1). This scales corruption and content together; it is not a smoothing of the corruption relative to the content.",
+    "amendment_1": "Final analysis plan amendment 1 (procedural): after the first TEST materialization pass collided with the VAL cache, the corrupted-image cache path gained the split name. The corruption bytes, the evaluation logic and this analysis are unchanged; no robustness TEST result existed at the time, and the 15 clean TEST evaluations were not redone.",
+    "no_robustness_claim": "The robustness numbers describe sensitivity to 4 synthetic corruptions at 3 fixed severities only. No model is called robust."
+  },
+  "robustness": {
+    "suite": "eurosat-c-v1",
+    "suite_sha256": "6d8d647f68021d21d6cb619f6e0cc637b6b3d97a5e20d25f3d3693addfcbfad2",
+    "label": "TEST",
+    "summary": {
+      "efficientnet_b0_imagenet_224": {
+        "clean": [
+          0.9843999999999999,
+          0.9829333333333332,
+          0.9857555555555555
+        ],
+        "mean_corrupted": [
+          0.43514444444444444,
+          0.4394685185185185,
+          0.4369537037037037
+        ],
+        "drop": [
+          0.5492555555555555,
+          0.5434648148148147,
+          0.5488018518518518
+        ],
+        "relative_drop": [
+          0.5579597273014583,
+          0.5529009917405197,
+          0.5567321926403511
+        ]
+      },
+      "majority_baseline": {
+        "clean": [
+          0.1,
+          0.1,
+          0.1
+        ],
+        "mean_corrupted": [
+          0.1,
+          0.1,
+          0.1
+        ],
+        "drop": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "relative_drop": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "resnet18_imagenet_224": {
+        "clean": [
+          0.9844444444444445,
+          0.9800444444444445,
+          0.9864444444444445
+        ],
+        "mean_corrupted": [
+          0.5077055555555555,
+          0.5179203703703704,
+          0.5146148148148149
+        ],
+        "drop": [
+          0.47673888888888893,
+          0.4621240740740741,
+          0.4718296296296296
+        ],
+        "relative_drop": [
+          0.4842720090293454,
+          0.47153379287409486,
+          0.4783134339565968
+        ]
+      },
+      "resnet18_scratch_64": {
+        "clean": [
+          0.9241111111111111,
+          0.8632222222222221,
+          0.9526222222222221
+        ],
+        "mean_corrupted": [
+          0.6055833333333334,
+          0.5558166666666666,
+          0.5993166666666666
+        ],
+        "drop": [
+          0.31852777777777774,
+          0.3074055555555555,
+          0.35330555555555554
+        ],
+        "relative_drop": [
+          0.3446855837441385,
+          0.35611404299137595,
+          0.3708768778576094
+        ]
+      },
+      "small_cnn_scratch_64": {
+        "clean": [
+          0.9577111111111112,
+          0.953,
+          0.9577111111111112
+        ],
+        "mean_corrupted": [
+          0.5576907407407408,
+          0.5516592592592593,
+          0.5541907407407407
+        ],
+        "drop": [
+          0.4000203703703704,
+          0.40134074074074066,
+          0.4035203703703705
+        ],
+        "relative_drop": [
+          0.41768375215598924,
+          0.42113404065135435,
+          0.42133829887617863
+        ]
+      }
+    },
+    "missing": []
+  },
+  "runs": [
+    {
+      "model": "majority_baseline",
+      "seed": 0,
+      "experiment_id": "exp-20261027-201053-5f2809",
+      "evaluation_id": "ev-20261029-112504-ec73cf",
+      "val_evaluation_id": "ev-20261028-041748-ef337a",
+      "n": 4050,
+      "class_names": [
+        "AnnualCrop",
+        "Forest",
+        "HerbaceousVegetation",
+        "Highway",
+        "Industrial",
+        "Pasture",
+        "PermanentCrop",
+        "Residential",
+        "River",
+        "SeaLake"
+      ],
+      "balanced_accuracy": 0.1,
+      "macro_f1": 0.02,
+      "accuracy": 0.1111111111111111,
+      "ci": {
+        "balanced_accuracy": {
+          "high": 0.1,
+          "low": 0.1,
+          "resamples_defined": 1000
+        },
+        "macro_f1": {
+          "high": 0.021546596166556513,
+          "low": 0.018385650224215247,
+          "resamples_defined": 1000
+        }
+      },
+      "val": {
+        "balanced_accuracy": 0.1,
+        "macro_f1": 0.02
+      }
+    },
+    {
+      "model": "majority_baseline",
+      "seed": 1,
+      "experiment_id": "exp-20261027-201101-632b02",
+      "evaluation_id": "ev-20261029-112523-9b58fd",
+      "val_evaluation_id": "ev-20261028-041804-166ee7",
+      "n": 4050,
+      "class_names": [
+        "AnnualCrop",
+        "Forest",
+        "HerbaceousVegetation",
+        "Highway",
+        "Industrial",
+        "Pasture",
+        "PermanentCrop",
+        "Residential",
+        "River",
+        "SeaLake"
+      ],
+      "balanced_accuracy": 0.1,
+      "macro_f1": 0.02,
+      "accuracy": 0.1111111111111111,
+      "ci": {
+        "balanced_accuracy": {
+          "high": 0.1,
+          "low": 0.1,
+          "resamples_defined": 1000
+        },
+        "macro_f1": {
+          "high": 0.021546596166556513,
+          "low": 0.018385650224215247,
+          "resamples_defined": 1000
+        }
+      },
+      "val": {
+        "balanced_accuracy": 0.1,
+        "macro_f1": 0.02
+      }
+    },
+    {
+      "model": "majority_baseline",
+      "seed": 2,
+      "experiment_id": "exp-20261027-201108-703436",
+      "evaluation_id": "ev-20261029-112543-28d2fa",
+      "val_evaluation_id": "ev-20261028-041820-d87583",
+      "n": 4050,
+      "class_names": [
+        "AnnualCrop",
+        "Forest",
+        "HerbaceousVegetation",
+        "Highway",
+        "Industrial",
+        "Pasture",
+        "PermanentCrop",
+        "Residential",
+        "River",
+        "SeaLake"
+      ],
+      "balanced_accuracy": 0.1,
+      "macro_f1": 0.02,
+      "accuracy": 0.1111111111111111,
+      "ci": {
+        "balanced_accuracy": {
+          "high": 0.1,
+          "low": 0.1,
+          "resamples_defined": 1000
+        },
+        "macro_f1": {
+          "high": 0.021546596166556513,
+          "low": 0.018385650224215247,
+          "resamples_defined": 1000
+        }
+      },
+      "val": {
+        "balanced_accuracy": 0.1,
+        "macro_f1": 0.02
+      }
+    },
+    {
+      "model": "resnet18_scratch_64",
+      "seed": 0,
+      "experiment_id": "exp-20261027-201115-e384ed",
+      "evaluation_id": "ev-20261029-112608-c4d668",
+      "val_evaluation_id": "ev-20261028-042026-b5cb93",
+      "n": 4050,
+      "class_names": [
+        "AnnualCrop",
+        "Forest",
+        "HerbaceousVegetation",
+        "Highway",
+        "Industrial",
+        "Pasture",
+        "PermanentCrop",
+        "Residential",
+        "River",
+        "SeaLake"
+      ],
+      "balanced_accuracy": 0.9241111111111111,
+      "macro_f1": 0.9247365998412992,
+      "accuracy": 0.9271604938271605,
+      "ci": {
+        "balanced_accuracy": {
+          "high": 0.9318088647081288,
+          "low": 0.9156746918663838,
+          "resamples_defined": 1000
+        },
+        "macro_f1": {
+          "high": 0.9323352845456475,
+          "low": 0.916240422850422,
+          "resamples_defined": 1000
+        }
+      },
+      "val": {
+        "balanced_accuracy": 0.9299555555555555,
+        "macro_f1": 0.9304632933634724
+      }
+    },
+    {
+      "model": "resnet18_scratch_64",
+      "seed": 1,
+      "experiment_id": "exp-20261027-202124-e89a98",
+      "evaluation_id": "ev-20261029-112633-e4bace",
+      "val_evaluation_id": "ev-20261028-042048-83be42",
+      "n": 4050,
+      "class_names": [
+        "AnnualCrop",
+        "Forest",
+        "HerbaceousVegetation",
+        "Highway",
+        "Industrial",
+        "Pasture",
+        "PermanentCrop",
+        "Residential",
+        "River",
+        "SeaLake"
+      ],
+      "balanced_accuracy": 0.8632222222222221,
+      "macro_f1": 0.8637670592608437,
+      "accuracy": 0.8679012345679012,
+      "ci": {
+        "balanced_accuracy": {
+          "high": 0.8735951912531205,
+          "low": 0.8532822456165653,
+          "resamples_defined": 1000
+        },
+        "macro_f1": {
+          "high": 0.8740051723827397,
+          "low": 0.8533022140564344,
+          "resamples_defined": 1000
+        }
+      },
+      "val": {
+        "balanced_accuracy": 0.8577777777777778,
+        "macro_f1": 0.857490654180072
+      }
+    },
+    {
+      "model": "resnet18_scratch_64",
+      "seed": 2,
+      "experiment_id": "exp-20261027-202749-e42275",
+      "evaluation_id": "ev-20261029-112658-df5146",
+      "val_evaluation_id": "ev-20261028-042111-ebe183",
+      "n": 4050,
+      "class_names": [
+        "AnnualCrop",
+        "Forest",
+        "HerbaceousVegetation",
+        "Highway",
+        "Industrial",
+        "Pasture",
+        "PermanentCrop",
+        "Residential",
+        "River",
+        "SeaLake"
+      ],
+      "balanced_accuracy": 0.9526222222222221,
+      "macro_f1": 0.9526984004719825,
+      "accuracy": 0.9540740740740741,
+      "ci": {
+        "balanced_accuracy": {
+          "high": 0.9592307011448871,
+          "low": 0.9454138185571189,
+          "resamples_defined": 1000
+        },
+        "macro_f1": {
+          "high": 0.9592231732095595,
+          "low": 0.945629660703477,
+          "resamples_defined": 1000
+        }
+      },
+      "val": {
+        "balanced_accuracy": 0.9498666666666666,
+        "macro_f1": 0.9502260722117354
+      }
+    },
+    {
+      "model": "small_cnn_scratch_64",
+      "seed": 0,
+      "experiment_id": "exp-20261027-204957-d42310",
+      "evaluation_id": "ev-20261029-112722-d17c6a",
+      "val_evaluation_id": "ev-20261028-042134-cf3fb5",
+      "n": 4050,
+      "class_names": [
+        "AnnualCrop",
+        "Forest",
+        "HerbaceousVegetation",
+        "Highway",
+        "Industrial",
+        "Pasture",
+        "PermanentCrop",
+        "Residential",
+        "River",
+        "SeaLake"
+      ],
+      "balanced_accuracy": 0.9577111111111112,
+      "macro_f1": 0.9586076967420439,
+      "accuracy": 0.9592592592592593,
+      "ci": {
+        "balanced_accuracy": {
+          "high": 0.9643584791582611,
+          "low": 0.9512233059215085,
+          "resamples_defined": 1000
+        },
+        "macro_f1": {
+          "high": 0.9647804084578903,
+          "low": 0.9523627314533999,
+          "resamples_defined": 1000
+        }
+      },
+      "val": {
+        "balanced_accuracy": 0.958777777777778,
+        "macro_f1": 0.9596432087090558
+      }
+    },
+    {
+      "model": "small_cnn_scratch_64",
+      "seed": 1,
+      "experiment_id": "exp-20261027-211106-cc7c83",
+      "evaluation_id": "ev-20261029-112747-79a389",
+      "val_evaluation_id": "ev-20261028-042156-27fe9e",
+      "n": 4050,
+      "class_names": [
+        "AnnualCrop",
+        "Forest",
+        "HerbaceousVegetation",
+        "Highway",
+        "Industrial",
+        "Pasture",
+        "PermanentCrop",
+        "Residential",
+        "River",
+        "SeaLake"
+      ],
+      "balanced_accuracy": 0.953,
+      "macro_f1": 0.9539035461200756,
+      "accuracy": 0.9545679012345679,
+      "ci": {
+        "balanced_accuracy": {
+          "high": 0.9597250234793326,
+          "low": 0.9464240170700169,
+          "resamples_defined": 1000
+        },
+        "macro_f1": {
+          "high": 0.960387826213095,
+          "low": 0.9474568992913213,
+          "resamples_defined": 1000
+        }
+      },
+      "val": {
+        "balanced_accuracy": 0.9542444444444443,
+        "macro_f1": 0.9547386550155114
+      }
+    },
+    {
+      "model": "small_cnn_scratch_64",
+      "seed": 2,
+      "experiment_id": "exp-20261027-213240-d42c79",
+      "evaluation_id": "ev-20261029-112811-931ebd",
+      "val_evaluation_id": "ev-20261028-042217-2ae5cf",
+      "n": 4050,
+      "class_names": [
+        "AnnualCrop",
+        "Forest",
+        "HerbaceousVegetation",
+        "Highway",
+        "Industrial",
+        "Pasture",
+        "PermanentCrop",
+        "Residential",
+        "River",
+        "SeaLake"
+      ],
+      "balanced_accuracy": 0.9577111111111112,
+      "macro_f1": 0.9586375141938859,
+      "accuracy": 0.9590123456790124,
+      "ci": {
+        "balanced_accuracy": {
+          "high": 0.964107271477416,
+          "low": 0.9511406948317794,
+          "resamples_defined": 1000
+        },
+        "macro_f1": {
+          "high": 0.9650459323657292,
+          "low": 0.9519702657212438,
+          "resamples_defined": 1000
+        }
+      },
+      "val": {
+        "balanced_accuracy": 0.9538222222222222,
+        "macro_f1": 0.954501693390292
+      }
+    },
+    {
+      "model": "resnet18_imagenet_224",
+      "seed": 0,
+      "experiment_id": "exp-20261027-214915-e0d372",
+      "evaluation_id": "ev-20261029-112850-a00cad",
+      "val_evaluation_id": "ev-20261028-041854-e1bd88",
+      "n": 4050,
+      "class_names": [
+        "AnnualCrop",
+        "Forest",
+        "HerbaceousVegetation",
+        "Highway",
+        "Industrial",
+        "Pasture",
+        "PermanentCrop",
+        "Residential",
+        "River",
+        "SeaLake"
+      ],
+      "balanced_accuracy": 0.9844444444444445,
+      "macro_f1": 0.9848038262959055,
+      "accuracy": 0.9851851851851852,
+      "ci": {
+        "balanced_accuracy": {
+          "high": 0.9881399450408828,
+          "low": 0.9800335722976656,
+          "resamples_defined": 1000
+        },
+        "macro_f1": {
+          "high": 0.9884538617123063,
+          "low": 0.980711387842276,
+          "resamples_defined": 1000
+        }
+      },
+      "val": {
+        "balanced_accuracy": 0.9868666666666666,
+        "macro_f1": 0.9873350935206713
+      }
+    },
+    {
+      "model": "resnet18_imagenet_224",
+      "seed": 1,
+      "experiment_id": "exp-20261027-225711-6db256",
+      "evaluation_id": "ev-20261029-112930-d32a72",
+      "val_evaluation_id": "ev-20261028-041929-b260a5",
+      "n": 4050,
+      "class_names": [
+        "AnnualCrop",
+        "Forest",
+        "HerbaceousVegetation",
+        "Highway",
+        "Industrial",
+        "Pasture",
+        "PermanentCrop",
+        "Residential",
+        "River",
+        "SeaLake"
+      ],
+      "balanced_accuracy": 0.9800444444444445,
+      "macro_f1": 0.98036328825459,
+      "accuracy": 0.9809876543209877,
+      "ci": {
+        "balanced_accuracy": {
+          "high": 0.9840161288007762,
+          "low": 0.9753713498616604,
+          "resamples_defined": 1000
+        },
+        "macro_f1": {
+          "high": 0.9844401531700696,
+          "low": 0.9757585342410047,
+          "resamples_defined": 1000
+        }
+      },
+      "val": {
+        "balanced_accuracy": 0.9824222222222222,
+        "macro_f1": 0.982460885247215
+      }
+    },
+    {
+      "model": "resnet18_imagenet_224",
+      "seed": 2,
+      "experiment_id": "exp-20261027-233452-43080e",
+      "evaluation_id": "ev-20261029-113009-789459",
+      "val_evaluation_id": "ev-20261028-042003-26e664",
+      "n": 4050,
+      "class_names": [
+        "AnnualCrop",
+        "Forest",
+        "HerbaceousVegetation",
+        "Highway",
+        "Industrial",
+        "Pasture",
+        "PermanentCrop",
+        "Residential",
+        "River",
+        "SeaLake"
+      ],
+      "balanced_accuracy": 0.9864444444444445,
+      "macro_f1": 0.98658766388881,
+      "accuracy": 0.9869135802469136,
+      "ci": {
+        "balanced_accuracy": {
+          "high": 0.9899172641571194,
+          "low": 0.9823551814106101,
+          "resamples_defined": 1000
+        },
+        "macro_f1": {
+          "high": 0.98995486796055,
+          "low": 0.9825448101507304,
+          "resamples_defined": 1000
+        }
+      },
+      "val": {
+        "balanced_accuracy": 0.9892444444444445,
+        "macro_f1": 0.989419095143479
+      }
+    },
+    {
+      "model": "efficientnet_b0_imagenet_224",
+      "seed": 0,
+      "experiment_id": "exp-20261028-004715-3da317",
+      "evaluation_id": "ev-20261029-113052-84ed06",
+      "val_evaluation_id": "ev-20261028-041610-12527c",
+      "n": 4050,
+      "class_names": [
+        "AnnualCrop",
+        "Forest",
+        "HerbaceousVegetation",
+        "Highway",
+        "Industrial",
+        "Pasture",
+        "PermanentCrop",
+        "Residential",
+        "River",
+        "SeaLake"
+      ],
+      "balanced_accuracy": 0.9843999999999999,
+      "macro_f1": 0.9847681637634773,
+      "accuracy": 0.9851851851851852,
+      "ci": {
+        "balanced_accuracy": {
+          "high": 0.9881623084393477,
+          "low": 0.9803892409403406,
+          "resamples_defined": 1000
+        },
+        "macro_f1": {
+          "high": 0.9882387700039246,
+          "low": 0.9808348309271344,
+          "resamples_defined": 1000
+        }
+      },
+      "val": {
+        "balanced_accuracy": 0.9840000000000002,
+        "macro_f1": 0.9843769089956698
+      }
+    },
+    {
+      "model": "efficientnet_b0_imagenet_224",
+      "seed": 1,
+      "experiment_id": "exp-20261028-013827-6cbab1",
+      "evaluation_id": "ev-20261029-113134-691d5f",
+      "val_evaluation_id": "ev-20261028-041651-df21cd",
+      "n": 4050,
+      "class_names": [
+        "AnnualCrop",
+        "Forest",
+        "HerbaceousVegetation",
+        "Highway",
+        "Industrial",
+        "Pasture",
+        "PermanentCrop",
+        "Residential",
+        "River",
+        "SeaLake"
+      ],
+      "balanced_accuracy": 0.9829333333333332,
+      "macro_f1": 0.9830213099132881,
+      "accuracy": 0.9834567901234568,
+      "ci": {
+        "balanced_accuracy": {
+          "high": 0.986844730860453,
+          "low": 0.9787235620134327,
+          "resamples_defined": 1000
+        },
+        "macro_f1": {
+          "high": 0.986940649694444,
+          "low": 0.978853460028177,
+          "resamples_defined": 1000
+        }
+      },
+      "val": {
+        "balanced_accuracy": 0.9891777777777777,
+        "macro_f1": 0.9892255351060797
+      }
+    },
+    {
+      "model": "efficientnet_b0_imagenet_224",
+      "seed": 2,
+      "experiment_id": "exp-20261028-030154-fe104a",
+      "evaluation_id": "ev-20261029-113216-4c6760",
+      "val_evaluation_id": "ev-20261028-041731-f7b236",
+      "n": 4050,
+      "class_names": [
+        "AnnualCrop",
+        "Forest",
+        "HerbaceousVegetation",
+        "Highway",
+        "Industrial",
+        "Pasture",
+        "PermanentCrop",
+        "Residential",
+        "River",
+        "SeaLake"
+      ],
+      "balanced_accuracy": 0.9857555555555555,
+      "macro_f1": 0.9859674446241036,
+      "accuracy": 0.9864197530864197,
+      "ci": {
+        "balanced_accuracy": {
+          "high": 0.9893004412442485,
+          "low": 0.9819777426114816,
+          "resamples_defined": 1000
+        },
+        "macro_f1": {
+          "high": 0.9895070275574643,
+          "low": 0.9821708204776535,
+          "resamples_defined": 1000
+        }
+      },
+      "val": {
+        "balanced_accuracy": 0.9879777777777777,
+        "macro_f1": 0.9882185431458215
+      }
+    }
+  ]
+}

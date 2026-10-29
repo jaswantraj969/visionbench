@@ -27,6 +27,7 @@ from visionbench.benchmarks import (
     _read,
     benchmark_dir,
     benchmark_info,
+    final_test_splits,
     list_benchmarks,
     read_document,
     verify_hashes,
@@ -62,6 +63,7 @@ def overview(request: Request) -> dict[str, Any]:
         "experiments_by_status": dict(Counter(e["status"] for e in exps)),
         "jobs_by_status": dict(Counter(j["status"] for j in jobs)),
         "test_images_unlocked": settings.test_images_unlocked,
+        "final_test_splits": final_test_splits(settings),
         "inference_device": settings.inference_device,
         "benchmarks": [_list_item(settings, n) for n in list_benchmarks(settings.benchmarks_dir)],
     }

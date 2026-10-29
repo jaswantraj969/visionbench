@@ -278,7 +278,9 @@ class InferenceService:
         warnings: list[str] = []
         notes: list[str] = []
         if split == "test" or identical_to_test:
-            if not self.settings.test_images_unlocked:
+            from visionbench.benchmarks import split_test_images_allowed
+
+            if not split_test_images_allowed(self.settings, lm.split_id):
                 how = "is in" if split == "test" else "has the same bytes as an image of"
                 raise InferenceError(
                     403,
@@ -286,7 +288,10 @@ class InferenceService:
                     f"this image {how} the TEST split of {lm.split_id}; test images are locked "
                     "until the final test evaluation (VISIONBENCH_TEST_IMAGES_UNLOCKED)",
                 )
-            warnings.append("TEST image: allowed only because test images are unlocked (M8)")
+            warnings.append(
+                "TEST image: allowed because the final TEST evaluation of this split is complete "
+                "(or test images are unlocked)"
+            )
         elif split == "val":
             notes.append("VALIDATION image: val chose this model's checkpoint (selection-biased)")
         elif split == "train":

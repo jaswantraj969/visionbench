@@ -46,6 +46,32 @@ def benchmark_dir(root: Path, name: str) -> Path:
     return path
 
 
+SPLIT_RE = re.compile(r"\| Split \| \**`(sp-[0-9a-f]{12})`")
+
+
+def final_test_splits(settings: Settings) -> list[str]:
+    """Splits whose single final TEST evaluation is complete: a frozen benchmark with
+    ``results/FINAL_REPORT.json``, its split id taken from ``BENCHMARK_PROTOCOL.md``."""
+    out: set[str] = set()
+    for name in list_benchmarks(settings.benchmarks_dir):
+        d = settings.benchmarks_dir / name
+        protocol = d / "BENCHMARK_PROTOCOL.md"
+        if not (d / "results" / "FINAL_REPORT.json").is_file() or not protocol.is_file():
+            continue
+        m = SPLIT_RE.search(protocol.read_text(encoding="utf-8"))
+        if m:
+            out.add(m.group(1))
+    return sorted(out)
+
+
+def split_test_images_allowed(settings: Settings, split_id: str | None) -> bool:
+    """TEST images of ``split_id`` may be shown: globally unlocked, or that split's final TEST
+    evaluation is done (M8). Every other split stays locked."""
+    return settings.test_images_unlocked or (
+        split_id is not None and split_id in final_test_splits(settings)
+    )
+
+
 def list_benchmarks(root: Path) -> list[str]:
     root = Path(root)
     if not root.is_dir():

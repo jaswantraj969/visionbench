@@ -70,7 +70,9 @@ def test_method_not_allowed_uses_error_schema(tmp_path: Path) -> None:
 
 
 def test_unhandled_exception_uses_error_schema(tmp_path: Path) -> None:
-    app = api_main.create_app(Settings(_env_file=None, data_root=tmp_path))
+    # no built frontend: its catch-all route would otherwise shadow a route added afterwards
+    settings = Settings(_env_file=None, data_root=tmp_path, frontend_dist=tmp_path / "no-dist")
+    app = api_main.create_app(settings)
 
     @app.get("/api/_boom")
     def boom() -> None:

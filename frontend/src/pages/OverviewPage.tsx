@@ -101,7 +101,13 @@ export function OverviewPage() {
       <Section title="Test split lock" id="test-lock">
         <QueryState query={overview} what="overview">
           {(o) =>
-            o.test_images_unlocked ? (
+            (o.final_test_splits ?? []).length > 0 ? (
+              <p>
+                <strong>Final TEST evaluation done.</strong> TEST images of the finalised split(s){" "}
+                {(o.final_test_splits ?? []).join(", ")} may be viewed and explained; the TEST
+                results are on the Benchmark page. No further TEST evaluation is offered.
+              </p>
+            ) : o.test_images_unlocked ? (
               <p>
                 <strong>Unlocked.</strong> TEST images may be viewed and explained. This is only set
                 after the single final test evaluation.

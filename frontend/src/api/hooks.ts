@@ -71,7 +71,7 @@ export const useSplit = (datasetId: string | undefined, splitId: string | undefi
 export const useSplitSample = (
   datasetId: string | undefined,
   splitId: string | undefined,
-  split: "train" | "val",
+  split: "train" | "val" | "test",
   perClass: number,
   seed: number,
 ) =>

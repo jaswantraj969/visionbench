@@ -224,7 +224,9 @@ def split_sample(
     import numpy as np
 
     settings = settings_of(request)
-    if split == "test" and not settings.test_images_unlocked:
+    from visionbench.benchmarks import split_test_images_allowed
+
+    if split == "test" and not split_test_images_allowed(settings, split_id):
         raise ApiError(
             403,
             "test_split_locked",

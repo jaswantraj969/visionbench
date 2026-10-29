@@ -89,8 +89,9 @@ Status values: todo / in progress / done / blocked.
 |---|---|---|---|
 | S1 split-aware cache path + plan Amendment 1 + tag v1.0.0-rc2 | done | 28f97a7 | VAL cache moved to .../val/, 12/12 conditions = M6 hashes (48,600 files verified); plan sha256 ff41ad85…; Windows suite 360 passed / 1 skipped; Linux container skipped (Docker daemon not running); DB: 15 clean TEST (ids = test_runs.json), 0 robustness TEST |
 | S2 robustness TEST + check update | done | (this commit) | materialize TEST pass 1 written 12/12 (199.6 s), pass 2 verified 12/12 with identical condition hashes (750.7 s); robustness TEST 15 runs x 12 = 180, all first attempts (2567.6 s, CUDA, keep-awake; an owner's game was also using the GPU); check: exactly 1 clean + 12 robustness TEST per run, 0 elsewhere |
-| S3 final report + app unlock + Benchmark TEST section | in progress | | |
+| S3 final report + app unlock + Benchmark TEST section | done | (this commit) | FINAL_REPORT.md/.json and robustness_test.md/.json from scripts/final_report.py (rank groups {efficientnet, resnet18_imagenet} > {small_cnn, resnet18_scratch} > {baseline}; comparisons 1 and 2 not distinguishable, 3 distinguishable: resnet18_imagenet > resnet18_scratch); amendment 1 added to the constraints; TEST images unlocked per finalised split only; Benchmark TEST section |
+| S4 screenshots + README + DoD + LICENSE | in progress | | |
 
 ## Next action
 
-S3: `final_report.py --split test`, then unlock for the app and the Benchmark TEST section.
+S4: screenshots, README results, DEFINITION_OF_DONE.md, LICENSE.

@@ -7,6 +7,7 @@ import {
   useExperiment,
   useExperiments,
   useGradcam,
+  useOverview,
   usePredict,
   useSplitSample,
 } from "../api/hooks";
@@ -43,19 +44,26 @@ export function ExplainPage() {
   const [expId, setExpId] = useState("");
   const chosen = expId || seed0[0]?.id || "";
   const exp = useExperiment(chosen || undefined);
-  const [source, setSource] = useState<"val" | "upload">("val");
+  const overview = useOverview();
+  const [source, setSource] = useState<"val" | "test" | "upload">("val");
   const [seed, setSeed] = useState(0);
   const [relpath, setRelpath] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [target, setTarget] = useState("");
-  const sample = useSplitSample(exp.data?.dataset_id, exp.data?.split_id, "val", 1, seed);
+  // TEST images are offered only once the split's single final TEST evaluation is complete.
+  const testOpen =
+    !!exp.data &&
+    (overview.data?.test_images_unlocked === true ||
+      (overview.data?.final_test_splits ?? []).includes(exp.data.split_id));
+  const imageSplit = source === "test" && testOpen ? "test" : "val";
+  const sample = useSplitSample(exp.data?.dataset_id, exp.data?.split_id, imageSplit, 1, seed);
   const predict = usePredict(chosen);
   const gradcam = useGradcam(chosen);
   const classNames = (
     (exp.data?.config.resolved?.class_names as string[] | undefined) ?? []
   ).slice();
   const input: ImageInput | null =
-    source === "val"
+    source !== "upload"
       ? relpath && exp.data
         ? { kind: "dataset", dataset_id: exp.data.dataset_id, relpath }
         : null
@@ -70,8 +78,8 @@ export function ExplainPage() {
     <>
       <PageHeader title="Explain">
         Predict one image and show its Grad-CAM. Images come from the VALIDATION split (seeded
-        browser, not hand-picked) or from an upload. TEST images are not offered while the test
-        split is locked.
+        browser, not hand-picked), from the TEST split once its single final evaluation is complete,
+        or from an upload.
       </PageHeader>
       <p className="limitations">
         <strong>Limitations.</strong> {LIMITATIONS}
@@ -127,10 +135,27 @@ export function ExplainPage() {
                 type="radio"
                 name="xp-src"
                 checked={source === "val"}
-                onChange={() => setSource("val")}
+                onChange={() => {
+                  setSource("val");
+                  setRelpath("");
+                }}
               />{" "}
               validation image
             </label>
+            {testOpen ? (
+              <label>
+                <input
+                  type="radio"
+                  name="xp-src"
+                  checked={source === "test"}
+                  onChange={() => {
+                    setSource("test");
+                    setRelpath("");
+                  }}
+                />{" "}
+                TEST image (final evaluation done)
+              </label>
+            ) : null}
             <label>
               <input
                 type="radio"
@@ -169,7 +194,11 @@ export function ExplainPage() {
               {sample.isError ? (
                 <ErrorBox error={sample.error} title="Could not list images" />
               ) : null}
-              <div className="image-grid" role="group" aria-label="Validation images">
+              <div
+                className="image-grid"
+                role="group"
+                aria-label={imageSplit === "test" ? "TEST images" : "Validation images"}
+              >
                 {(sample.data?.images ?? []).map((img) => (
                   <button
                     key={img.relpath}
@@ -191,10 +220,12 @@ export function ExplainPage() {
                   </button>
                 ))}
               </div>
-              <NotAvailable
-                label="TEST images"
-                reason="the test split is locked until the single final test evaluation"
-              />
+              {testOpen ? null : (
+                <NotAvailable
+                  label="TEST images"
+                  reason="the test split is locked until the single final test evaluation"
+                />
+              )}
             </>
           )}
           <div className="actions">

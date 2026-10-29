@@ -457,6 +457,62 @@ describe("Benchmark", () => {
     expect(await screen.findByText("# Toy protocol")).toBeInTheDocument();
   });
 
+  it("renders the TEST section from the final report", async () => {
+    const ms = (mean: number) => ({ mean, sd: 0.001, per_seed: [mean, mean, mean] });
+    const ci = (point: number) => ({ point, low: point - 0.01, high: point + 0.01 });
+    const report = {
+      label: "TEST",
+      final_analysis_plan_sha256: "ab".repeat(32),
+      models: {
+        small_cnn: {
+          balanced_accuracy: ms(0.9),
+          macro_f1: ms(0.89),
+          val: { balanced_accuracy: ms(0.91), macro_f1: ms(0.9) },
+        },
+      },
+      ranking: [{ model: "small_cnn", rank: 1, rank_group: 1 }],
+      comparisons: [
+        {
+          a: "small_cnn",
+          b: "majority_baseline",
+          per_seed: {
+            "0": { balanced_accuracy: ci(0.8), macro_f1: ci(0.8) },
+            "1": { balanced_accuracy: ci(0.8), macro_f1: ci(0.8) },
+            "2": { balanced_accuracy: ci(0.8), macro_f1: ci(0.8) },
+          },
+          verdict: {
+            balanced_accuracy: "distinguishable: small_cnn > majority_baseline",
+            macro_f1: "distinguishable: small_cnn > majority_baseline",
+          },
+        },
+      ],
+      robustness: {
+        suite: "toy-c",
+        summary: {
+          small_cnn: {
+            clean: [0.9, 0.9, 0.9],
+            mean_corrupted: [0.5, 0.5, 0.5],
+            drop: [0.4, 0.4, 0.4],
+          },
+        },
+        missing: [],
+      },
+      constraints: { single_split: "One fixed split." },
+    };
+    server.use(
+      http.get("/api/benchmarks/toy-v1", () =>
+        HttpResponse.json({ ...F.benchmarkDetail, final_report: report }),
+      ),
+    );
+    renderAt("/benchmark");
+    const table = await screen.findByRole("table", { name: "TEST ranking" });
+    expect(within(table).getByText("0.9000 ± 0.0010")).toBeInTheDocument();
+    expect(screen.getAllByText("distinguishable: small_cnn > majority_baseline")).toHaveLength(2);
+    expect(screen.getByRole("table", { name: "TEST robustness summary" })).toBeInTheDocument();
+    expect(screen.getByText("single_split")).toBeInTheDocument();
+    expect(screen.queryByText(/Not evaluated yet/)).not.toBeInTheDocument();
+  });
+
   it("shows a hash mismatch and an error state", async () => {
     server.use(
       http.get("/api/benchmarks/toy-v1", () =>
