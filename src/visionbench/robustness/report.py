@@ -28,9 +28,12 @@ SCOPE = (
 CONFOUNDS = [
     (
         "resolution_upsampling",
-        "Corruptions are applied at 64 px. Pretrained models then upsample to 256 and "
-        "centre-crop 224, which smooths high-frequency corruptions (noise, JPEG artefacts) before "
-        "the model sees them; scratch models see them at native resolution.",
+        "Corruptions are applied at 64 px. Pretrained models see an upsampled version (resize 256, "
+        "centre crop 224) in which corruption and content are scaled together (a blur of 1 px "
+        "becomes about 4 px); scratch models see both at native resolution. This is not a "
+        "smoothing of the corruption relative to the content (robustness protocol, amendment 1); "
+        "pretraining and resolution stay confounded, so group differences have no attributed "
+        "cause.",
     ),
     (
         "pretrained_vs_scratch",

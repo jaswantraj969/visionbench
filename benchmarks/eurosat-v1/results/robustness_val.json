@@ -2,7 +2,7 @@
   "label": "VALIDATION (selection-biased) — not test results",
   "scope": "Scope: synthetic corruptions at 3 fixed severities on one dataset (EuroSAT RGB, one split). The numbers describe sensitivity to THESE corruptions only; they do not show general robustness, robustness to real sensor degradation, or robustness to distribution shift. No model is called robust.",
   "confounds": {
-    "resolution_upsampling": "Corruptions are applied at 64 px. Pretrained models then upsample to 256 and centre-crop 224, which smooths high-frequency corruptions (noise, JPEG artefacts) before the model sees them; scratch models see them at native resolution.",
+    "resolution_upsampling": "Corruptions are applied at 64 px. Pretrained models see an upsampled version (resize 256, centre crop 224) in which corruption and content are scaled together (a blur of 1 px becomes about 4 px); scratch models see both at native resolution. This is not a smoothing of the corruption relative to the content (robustness protocol, amendment 1); pretraining and resolution stay confounded, so group differences have no attributed cause.",
     "pretrained_vs_scratch": "ImageNet pretraining and input resolution are confounded with each other.",
     "centre_crop": "Pretrained models never see the 4 px border of a tile.",
     "single_split": "One fixed split: no split-to-split variance.",

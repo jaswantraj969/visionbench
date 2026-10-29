@@ -517,7 +517,9 @@ Results are in REVIEW_PACKET.md.
   robustness results.
 - **Claims.** Results describe sensitivity to the listed corruptions only, never general
   robustness. Differences are called distinguishable from zero only when their paired CI
-  excludes zero. Confounds (notably: pretrained models upsample 64 px inputs to 256 and crop
-  224, which smooths high-frequency corruptions) are stated with every report.
+  excludes zero. Confounds are stated with every report, notably: pretrained models upsample
+  the 64 px input (resize 256, crop 224), scaling corruption and content together (not smoothing
+  the corruption relative to the content; robustness protocol amendment 1), and pretraining and
+  resolution stay confounded.
 - **Pipeline check.** The majority baseline ignores the image, so its corrupted metrics must
   equal its clean metrics exactly.

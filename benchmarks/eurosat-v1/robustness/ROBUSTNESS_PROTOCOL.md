@@ -137,4 +137,28 @@ a condition whose hashes do not match.
 Each amendment is appended here with the date, what changed, why, and which evaluations were
 redone (all runs).
 
-_None._
+### Amendment 1 — 2026-10-29 — text only: correction of the resolution/upsampling confound note (section 6)
+
+**What changed:** only the explanation of the "Resolution / upsampling" confound. No
+procedure, suite, corruption, severity, seed, storage rule or evaluation changes; nothing is
+rerun. Section 6 above is left as frozen; this amendment supersedes its first row.
+
+**Why:** the note says that upsampling 64 -> 256 -> centre crop 224 "smooths high-frequency
+corruptions ... before the model sees them". That was a reasoning error. Resizing scales the
+corruption **together with the image content**: the resize scales by 256 / 64 = 4 and the
+centre crop does not rescale, so a blur of sigma = 1 px at 64 px becomes a blur of about 4 px in
+the 224 px model input (the often-quoted 224 / 64 = 3.5 would apply to a direct resize to 224),
+noise grains become blobs of about 4x4 pixels, and JPEG 8x8 blocks become 32x32 blocks. Relative
+to the content, the corruption is not smoothed away.
+
+**Corrected note:** corruptions are applied at 64 px; pretrained models see an upsampled
+(256, centre crop 224) version in which corruption and content are scaled together, while
+scratch models see both at native resolution. The input statistics therefore differ between the
+two groups, but not by a smoothing of the corruption relative to the content.
+
+**Relation to the VAL results:** the measured VAL direction (the pretrained 224 px models fall
+further than the scratch 64 px models under noise, blur and JPEG; `results/robustness_val.md`) is
+consistent with this correction but **not explained by it**: pretraining and input resolution
+remain confounded with each other, so no cause can be attributed.
+
+**Evaluations redone:** none (text-only amendment).
