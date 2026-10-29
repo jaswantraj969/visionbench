@@ -1,4 +1,4 @@
-"""Single-image prediction, run synchronously in the API process.
+"""Single-image prediction and Grad-CAM, run synchronously in the API process.
 
 Why not a worker job: a job needs a fresh process (10-15 s to import torch and start), which is
 unusable for interactive requests. Inference is cheap enough to run in the API process, so it is
@@ -30,6 +30,7 @@ bounded instead:
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import threading
 import time
@@ -53,6 +54,14 @@ from visionbench.evaluation.data import (
     open_for_evaluation,
     verify_checkpoint,
 )
+from visionbench.explain.geometry import ValGeometry
+from visionbench.explain.gradcam import (
+    LIMITATIONS,
+    ExplanationNotSupported,
+    grad_cam,
+    target_layer_name,
+)
+from visionbench.explain.overlay import render_overlay
 from visionbench.models.baseline import MajorityBaseline
 from visionbench.tracking.store import DB_FILENAME, ExperimentStore
 from visionbench.training.preprocessing import Preprocessing
@@ -361,4 +370,85 @@ class InferenceService:
             },
             "warnings": warnings,
             "notes": notes,
+        }
+
+    def gradcam(
+        self, experiment_id: str, source: ImageSource, target_class: str | None = None
+    ) -> dict[str, Any]:
+        start = time.perf_counter()
+        with self.slot():
+            lm, hit = self.get_model(experiment_id)
+            if isinstance(lm.model, MajorityBaseline):
+                raise ExplanationNotSupported(f"Grad-CAM is not supported for {lm.model_name}")
+            layer = target_layer_name(lm.model_name)
+            if target_class is not None and target_class not in lm.class_names:
+                raise InferenceError(
+                    422,
+                    "unknown_class",
+                    f"unknown target_class {target_class!r}; classes: {lm.class_names}",
+                )
+            img = self.read_input(source)
+            warnings, notes = self.check_input(lm, img)
+            x = self._tensor(lm, img)
+            with lm.lock:
+                with torch.inference_mode():
+                    probs = torch.softmax(lm.model(x).double(), dim=1)[0].cpu()
+                predicted = int(probs.argmax())
+                target = predicted if target_class is None else lm.class_names.index(target_class)
+                self._sync()
+                t0 = time.perf_counter()
+                cam = grad_cam(lm.model, x, target, layer)
+                self._sync()
+                cam_ms = (time.perf_counter() - t0) * 1000
+        assert lm.preprocessing is not None
+        geometry = ValGeometry.from_preprocessing(lm.preprocessing, *img.size)
+        if cam.all_zero:
+            warnings.append(
+                "the CAM is all zeros: no positive evidence for the target class at this layer "
+                "(nothing is highlighted; the map is not rescaled)"
+            )
+        fh, fw = cam.feature_map_size
+        where = (
+            f"{img.source['dataset_id']}/{img.source['relpath']}"
+            if img.source["type"] == "dataset"
+            else "upload"
+        )
+        png, shown = render_overlay(
+            img.image,
+            cam.normalized,
+            geometry,
+            all_zero=cam.all_zero,
+            caption=[
+                f"target: {lm.class_names[target]} (p={float(probs[target]):.3f}); "
+                f"predicted: {lm.class_names[predicted]}",
+                f"{lm.model_name} {lm.experiment_id}; CAM {fh}x{fw} at {cam.layer}",
+                f"source: {where}",
+            ],
+        )
+        return self._common(lm, img, hit) | {
+            "target_class": lm.class_names[target],
+            "target_probability": float(probs[target]),
+            "predicted_class": lm.class_names[predicted],
+            "predicted_probability": float(probs[predicted]),
+            "cam": {
+                "layer": cam.layer,
+                "feature_map_size": [fh, fw],
+                "resolution": f"{fh}x{fw}",
+                "values": [[round(float(v), 6) for v in row] for row in cam.normalized],
+                "normalization": "divided by the CAM maximum (0 = none, 1 = max)",
+                "all_zero": cam.all_zero,
+            },
+            "geometry": geometry.describe(),
+            "overlay": {
+                "png": "data:image/png;base64," + base64.b64encode(png).decode("ascii"),
+                "display_size": shown,
+            },
+            "timing_ms": {
+                "gradcam": cam_ms,
+                "model_load": None if hit else lm.load_seconds * 1000,
+                "total": (time.perf_counter() - start) * 1000,
+            },
+            "warnings": warnings,
+            "notes": notes,
+            "limitations": LIMITATIONS,
         }
