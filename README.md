@@ -250,6 +250,21 @@ These commands were run for M6:
   --clean-eval-id <pinned B1 val evaluation> --device cuda` for each run; it is resumable.
 - `--split test` is refused until M8 (`VISIONBENCH_TEST_IMAGES_UNLOCKED`).
 
+Through the API (run against `visionbench serve` on the eurosat-v1 data root; the suite is named,
+never a path; conditions already evaluated are skipped):
+
+```powershell
+curl.exe -s -X POST http://127.0.0.1:8000/api/experiments/exp-20261027-204957-d42310/robustness -H "X-VisionBench-Request: 1" -H "Content-Type: application/json" -d '{\"suite\":\"eurosat-c-v1\",\"split\":\"val\"}'
+curl.exe -s http://127.0.0.1:8000/api/jobs/job-YYYYMMDD-HHMMSS-xxxxxx
+curl.exe -s "http://127.0.0.1:8000/api/robustness?experiment_id=exp-20261027-204957-d42310"
+curl.exe -s http://127.0.0.1:8000/api/robustness/rb-YYYYMMDD-HHMMSS-xxxxxx
+```
+
+```text
+> (same POST with "split":"test")
+{"error":{"code":"test_split_locked","message":"robustness on the TEST split is locked until the final test evaluation (M8); set VISIONBENCH_TEST_IMAGES_UNLOCKED=true only then"}}
+```
+
 ## Run tests and lint
 
 ```powershell
