@@ -18,6 +18,7 @@ import io
 import json
 import os
 import shutil
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -166,6 +167,19 @@ def _doc(src: SplitSource, suite: Suite, cond: Condition, entries: list[dict[str
     return doc | {"condition_hash": condition_hash(doc)}
 
 
+def _rename_into_place(tmp: Path, target: Path, attempts: int = 10) -> None:
+    """``os.replace`` with retries: on Windows a directory of freshly written files can be
+    briefly locked by the search indexer or antivirus (WinError 5 / 32)."""
+    for i in range(attempts):
+        try:
+            os.replace(tmp, target)
+            return
+        except PermissionError:
+            if i == attempts - 1:
+                raise
+            time.sleep(0.5 * (i + 1))
+
+
 def materialize_condition(
     src: SplitSource, suite: Suite, cond: Condition, root: Path
 ) -> ConditionResult:
@@ -210,7 +224,7 @@ def materialize_condition(
             tmp / "condition.json",
             doc | {"created_at": datetime.now(UTC).isoformat(timespec="seconds")},
         )
-        os.replace(tmp, target)
+        _rename_into_place(tmp, target)
     except BaseException:
         shutil.rmtree(tmp, ignore_errors=True)
         raise

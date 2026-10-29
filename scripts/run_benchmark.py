@@ -304,12 +304,20 @@ class Benchmark:
             ]
             all_test = es.evaluations(split="test")
             val_evals = [e for e in es.evaluations(split="val") if e["experiment_id"] in bench]
+            rob_test = es.robustness_evaluations(split="test")  # M6: corrupted-input results
+            rob_val = [
+                r for r in es.robustness_evaluations(split="val") if r["experiment_id"] in bench
+            ]
         print(f"benchmark experiments: {len(bench)}; pilot + repro-check experiments: {len(pilot)}")
         print(f"val evaluations of benchmark experiments: {len(val_evals)}")
         print(f"test evaluations of benchmark or pilot experiments: {len(test_evals)}")
         print(f"test evaluations in the whole database: {len(all_test)}")
+        print(f"robustness val evaluations of benchmark experiments: {len(rob_val)}")
+        print(f"robustness test evaluations in the whole database: {len(rob_test)}")
         assert not test_evals, f"TEST evaluations exist: {[e['id'] for e in test_evals]}"
-        print("OK: no test evaluation exists for any benchmark, pilot or repro-check experiment")
+        assert not all_test, f"TEST evaluations exist: {[e['id'] for e in all_test]}"
+        assert not rob_test, f"TEST robustness evaluations exist: {[r['id'] for r in rob_test]}"
+        print("OK: zero test evaluations of any kind (clean or robustness) in the whole database")
 
     def summary(self) -> str:
         from visionbench.core.jsonio import read_json
