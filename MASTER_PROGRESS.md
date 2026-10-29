@@ -23,16 +23,16 @@ Status values: todo / in progress / done / blocked.
 
 | step | status | commit | notes |
 |---|---|---|---|
-| A1 scaffold, API types, client, proxy, static serving, read-only endpoints | in progress | | |
-| A2 pages (Overview, Datasets, Training, Jobs, Experiments, Evaluate & Compare, Explain, Robustness, Benchmark) | todo | | |
-| A3 component tests, Playwright e2e, coverage | todo | | |
-| GATE A | todo | | |
+| A1 scaffold, API types, client, proxy, static serving, read-only endpoints | done | 7b53c81, 99da9d4 | |
+| A2 pages (Overview, Datasets, Training, Jobs, Experiments, Evaluate & Compare, Explain, Robustness, Benchmark) | done | 99da9d4 | |
+| A3 component tests, Playwright e2e, coverage | done | 9d1678a, 99da9d4 | 42 unit tests, 87.67 % lines; e2e 1 passed; e2e found a real bug (same-origin POST refused), fixed in 9d1678a |
+| GATE A | done | 99da9d4 | lint/typecheck/tests/build OK; backend 345 passed / 1 skipped both modes (clean export); walk of all pages on the real data root, 0 errors; check: 0 test evaluations |
 
 ## Phase B — Release engineering
 
 | step | status | commit | notes |
 |---|---|---|---|
-| B1 Docker (files; build/run if available) | todo | | Docker CLI 29.7.2 installed; daemon not running at start |
+| B1 Docker (files; build/run if available) | in progress | | Docker CLI 29.7.2 installed; daemon not running at start; started the installed Docker Desktop (user-level app, no install/admin): daemon 29.7.2 linux/amd64 up |
 | B2 Linux test run + CI workflow | todo | | GitHub Actions cannot run: no remote |
 | B3 demo-data, fresh-clone Quick Start, lock files | todo | | |
 | B4 documentation | todo | | |
@@ -65,7 +65,13 @@ Status values: todo / in progress / done / blocked.
   messages. D3 uses a reconstruction from the task GOAL and IMPLEMENTATION_PLAN.md (M0-M8),
   listed in REVIEW_PACKET.md. **Owner to confirm or supply the original list.**
 - **LICENSE:** the owner's choice is not known; no LICENSE file is added. **Owner TODO.**
+- **Responsive layout:** at 768 px wide tables (e.g. Benchmark runs) scroll horizontally inside
+  their own box (`.table-scroll`); the page itself has no horizontal overflow (measured 0 px at
+  1024 and 768 px).
+- **Docker Desktop:** it was installed but not running. Starting the installed per-user app is
+  not a system-software install or admin change, so it was started (Phase B).
 
 ## Next action
 
-Phase A: finish component tests, commit A1/A2, then the Playwright e2e (A3).
+Phase B: build and run the image (B1); Linux test run in a container (B2); fresh-clone Quick
+Start (B3); documentation (B4); Gate B and tag `v1.0.0-rc1`.

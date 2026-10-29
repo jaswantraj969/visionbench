@@ -407,3 +407,110 @@ detail: gaussian_noise/0.04 bal_acc=0.2948444444444444
   the export): normal **340 passed, 1 skipped** (334.05 s); `CUDA_VISIBLE_DEVICES=-1`
   **340 passed, 1 skipped** (512.21 s).
 
+## Phase A — M7 frontend (done)
+
+Commits: `7b53c81` (backend read-only views + same-origin static serving), `9d1678a` (security
+fix found by the e2e test), `99da9d4` (frontend, tests, e2e).
+
+**Stack and dependencies.**
+- React 18.3.1, TypeScript 5.6.3 (strict, `noUncheckedIndexedAccess`), Vite 5.4.11, React Router
+  6.28.0, TanStack Query 5.62.7, Recharts 2.15.0.
+- Tests: Vitest 2.1.8, Testing Library, MSW 2.6.8, Playwright 1.49.1.
+- Lint and format: ESLint 9.16.0 and Prettier 3.4.2.
+- All versions are pinned exactly, with `package-lock.json`.
+- `npm install` printed deprecation notices for recharts 2.x, eslint 9.16 and glob@10.5.0. They
+  are noted here and were not acted on.
+- Playwright downloaded Chromium headless shell 131 to `%LOCALAPPDATA%\ms-playwright` (user
+  profile, not the repo).
+
+**API types.**
+- `frontend/src/api/schema.d.ts` is generated from `create_app().openapi()` by
+  `npm run gen:api`.
+- `npm run check:api` fails if the file is stale. It reported "up to date" at 99da9d4.
+
+**Backend additions for the pages** (all read-only, GET):
+- `/api/overview`, `/api/benchmarks`, `/api/benchmarks/{name}`,
+  `/api/benchmarks/{name}/documents/{document}` (a fixed list of documents, no paths) and
+  `/api/robustness-suites`;
+- a seeded split sample, where a TEST sample gets 403 `test_split_locked`;
+- dataset audit;
+- experiment tags.
+
+`visionbench serve` serves `frontend/dist` with an SPA fallback. `/api/...` keeps JSON 404s, and
+the Host and header guards are unchanged (backend test: `tests/api/test_frontend_views.py`).
+
+**Bug found by the e2e test.** Browsers send `Origin` on same-origin POSTs, so the served
+frontend got 403 `origin_not_allowed`. The guard now also accepts the API's own origin
+(`http(s)://` + the already-validated Host). Test:
+`test_same_origin_post_from_the_served_frontend_is_allowed`. A foreign Host still fails first
+with `invalid_host`.
+
+**Gate A** (all run at 99da9d4 in this session):
+
+| check | result |
+|---|---|
+| `npm run lint` (ESLint + Prettier, src and e2e) | pass |
+| `npm run typecheck` | pass |
+| `npm run check:api` | up to date |
+| `npm run test:coverage` | 4 files, **42 passed**; lines 87.67 %, branches 82.13 %, functions 89.27 % |
+| `npm run build` | pass (JS 711.29 kB, gzip 206.33 kB; Vite's > 500 kB chunk notice, not acted on) |
+| Playwright e2e (real backend, temp data root, synthetic shapes) | **1 passed** (2.7 min) |
+| `ruff check .`, `ruff format --check .` | pass (140 files) |
+| full pytest, clean `git archive` export of 99da9d4, normal | **345 passed, 1 skipped, 1 warning** (620.72 s) |
+| same, `CUDA_VISIBLE_DEVICES=-1` | **345 passed, 1 skipped, 1 warning** (593.15 s) |
+| `run_benchmark.py check benchmarks/eurosat-v1` | 0 test evaluations, 0 robustness test evaluations (whole DB) |
+
+- The pytest output was captured with `tail -4`, so the text of the one warning was not recorded
+  at Gate A. It is recorded with the Gate B run.
+- The skipped test is the file-symlink case (no symlink privilege on this Windows account).
+
+**The e2e flow** runs in the browser against `scripts/e2e_backend.py`, with a fresh data root and
+generated shapes, never EuroSAT:
+1. upload a ZIP, then the import job;
+2. create a split;
+3. train `small_cnn` on CPU with `max_steps`, with visible progress, plus a majority baseline;
+4. curves;
+5. VAL evaluations;
+6. compare, showing confound flags;
+7. confusion matrix;
+8. predict and Grad-CAM on a VAL image;
+9. upload of a TEST image's bytes, which shows the locked message;
+10. robustness on a small synthetic suite (VAL), 2 evaluated;
+11. cancel a running training job, then confirmed `cancelled`;
+12. Overview shows "Locked.".
+
+**Manual walk of the built app on the real data root.**
+- Ran `visionbench serve` on `./var` and drove Chromium with a Playwright script (outside the
+  repo).
+- Every page was visited; recorded: h1, any error box, console errors.
+
+| page | URL | h1 | error boxes |
+|---|---|---|---|
+| Overview | `/` | Overview | 0 |
+| Datasets | `/datasets` | Datasets | 0 |
+| Dataset detail | `/datasets/ds-61112928e412` | Dataset: eurosat-rgb | 0 |
+| Training | `/training` | Training | 0 |
+| Jobs | `/jobs` | Jobs | 0 |
+| Job detail | `/jobs/job-20261029-080711-4d0eed` | Job | 0 |
+| Experiments | `/experiments` | Experiments | 0 |
+| Experiment detail | `/experiments/exp-20261027-201053-5f2809` | Experiment exp-20261027-201053-5f2809 | 0 |
+| Evaluation view | `/evaluate?evaluation=ev-20261028-041748-ef337a` | Evaluate & Compare | 0 |
+| Compare (two benchmark runs, VAL) | `/evaluate` | Evaluate & Compare | 0 |
+| Explain (seed-0 VAL browser, Predict + Grad-CAM, efficientnet_b0 seed 0) | `/explain` | Explain | 0 |
+| Robustness | `/robustness` | Robustness | 0 |
+| Benchmark | `/benchmark` | Benchmark | 0 |
+| unknown route | `/no-such-page` | Page not found | 0 |
+
+- Console errors: none.
+- Page horizontal overflow at 1024 px and 768 px: 0 px. At 768 px the wide runs table scrolls
+  inside its own box.
+- Explain (checked visually):
+  - Prediction: AnnualCrop, p = 0.9988, "VALIDATION (selection-biased)" image label, forward
+    88.9 ms, total 10 212.2 ms (first, cold request);
+  - Grad-CAM: 7×7 at `features.8`, `vb-gradcam-2`, "not seen by the model 23.4 %";
+  - the limitations note and attribution are visible.
+- Benchmark page: both hash groups "all hashes OK", final analysis plan "not present", TEST
+  section "Not evaluated yet".
+- Predict and Grad-CAM are not recorded, so no DB rows were added. Server and worker were
+  stopped afterwards, and port 8000 was free.
+
