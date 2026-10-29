@@ -1,9 +1,15 @@
-"""Streaming multipart upload: the ZIP is written to ``<data_root>/tmp/uploads/<upload_id>.zip``
-chunk by chunk while counting bytes, so an oversized upload is rejected (413) without ever being
-buffered in memory (Starlette's ``UploadFile`` would spool the whole body first, unbounded).
+"""Multipart uploads.
+
+Dataset ZIPs (:func:`receive_zip_upload`): the ZIP is written to
+``<data_root>/tmp/uploads/<upload_id>.zip`` chunk by chunk while counting bytes, so an oversized
+upload is rejected (413) without ever being buffered in memory (Starlette's ``UploadFile`` would
+spool the whole body first, unbounded).
 
 Accepted form fields: ``file`` (the archive) and ``name`` (dataset name, small). Anything else
 is ignored without being stored.
+
+Images for inference (:func:`receive_image_upload`): one small image, kept in memory with a byte
+limit (``inference_max_upload_mb``), never written to disk.
 """
 
 from __future__ import annotations
@@ -144,3 +150,94 @@ def _abort(out: IO[bytes] | None, settings: Settings, upload_id: str) -> None:
     if out is not None:
         out.close()
     cleanup_upload(settings, upload_id)
+
+
+@dataclass
+class ImageUpload:
+    data: bytes
+    filename: str | None
+    fields: dict[str, str]
+
+
+IMAGE_FORM_FIELDS = ("target_class",)
+
+
+async def receive_image_upload(request: Request, max_mb: int) -> ImageUpload:
+    """Multipart form with one ``file`` part (an image) and optional small text fields
+    (:data:`IMAGE_FORM_FIELDS`). Kept in memory (never written to disk), at most ``max_mb``."""
+    ctype, options = parse_options_header(request.headers.get("content-type", ""))
+    boundary = options.get(b"boundary")
+    if ctype != b"multipart/form-data" or not boundary:
+        raise ApiError(415, "unsupported_media_type", "expected multipart/form-data")
+    limit = max_mb << 20
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > limit + MULTIPART_OVERHEAD:
+        raise ApiError(413, "upload_too_large", f"image upload exceeds {max_mb} MB")
+    state: dict[str, Any] = {"field": None, "buf": bytearray(), "header": b"", "headers": {}}
+    file_data = bytearray()
+    fields: dict[str, str] = {}
+    meta: dict[str, Any] = {"seen_file": False, "filename": None}
+
+    def on_part_begin() -> None:
+        state.update(headers={}, field=None, buf=bytearray())
+
+    def on_header_field(data: bytes, start: int, end: int) -> None:
+        state["header"] = data[start:end].lower()
+
+    def on_header_value(data: bytes, start: int, end: int) -> None:
+        state["headers"][state["header"]] = data[start:end]
+
+    def on_headers_finished() -> None:
+        _, opts = parse_options_header(state["headers"].get(b"content-disposition", b""))
+        name = opts.get(b"name", b"").decode("utf-8", "replace")
+        state["field"] = name
+        if name == "file":
+            if meta["seen_file"]:
+                raise ApiError(422, "multiple_files", "exactly one file part is allowed")
+            meta["seen_file"] = True
+            raw = opts.get(b"filename")
+            meta["filename"] = raw.decode("utf-8", "replace")[-255:] if raw else None
+
+    def on_part_data(data: bytes, start: int, end: int) -> None:
+        chunk = data[start:end]
+        if state["field"] == "file":
+            if len(file_data) + len(chunk) > limit:
+                raise _TooLarge
+            file_data.extend(chunk)
+        elif state["field"] in IMAGE_FORM_FIELDS:
+            state["buf"] += chunk
+            if len(state["buf"]) > MAX_FIELD_BYTES:
+                raise ApiError(422, "field_too_large", f"form field {state['field']!r} is too long")
+
+    def on_part_end() -> None:
+        if state["field"] in IMAGE_FORM_FIELDS:
+            fields[state["field"]] = state["buf"].decode("utf-8", "replace")
+
+    parser = MultipartParser(
+        boundary,
+        {
+            "on_part_begin": on_part_begin,
+            "on_header_field": on_header_field,
+            "on_header_value": on_header_value,
+            "on_headers_finished": on_headers_finished,
+            "on_part_data": on_part_data,
+            "on_part_end": on_part_end,
+        },
+    )
+    received = 0
+    try:
+        async for chunk in request.stream():
+            received += len(chunk)
+            if received > limit + MULTIPART_OVERHEAD:
+                raise _TooLarge
+            parser.write(chunk)
+        parser.finalize()
+    except _TooLarge:
+        raise ApiError(413, "upload_too_large", f"image upload exceeds {max_mb} MB") from None
+    except ApiError:
+        raise
+    except Exception as exc:  # malformed multipart body
+        raise ApiError(422, "malformed_multipart", "could not parse the multipart body") from exc
+    if not meta["seen_file"]:
+        raise ApiError(422, "missing_file", "form field 'file' is required")
+    return ImageUpload(bytes(file_data), meta["filename"], fields)

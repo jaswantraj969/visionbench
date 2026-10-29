@@ -24,6 +24,8 @@ from visionbench.core.errors import (
 from visionbench.core.redact import scrub_paths
 from visionbench.data.archive import ArchiveRejected, ImportPathError
 from visionbench.evaluation.data import EvaluationError, RepeatedTestEvaluationError
+from visionbench.explain.gradcam import ExplanationNotSupported
+from visionbench.inference.service import InferenceError
 from visionbench.jobs.store import QueueFullError
 from visionbench.tracking.store import NotFoundError, TrackingError
 from visionbench.training.config import ConfigError
@@ -64,6 +66,7 @@ def map_exception(exc: Exception) -> tuple[int, str]:
     """(HTTP status, error code) for library exceptions; order matters (subclasses first)."""
     table: list[tuple[type[Exception], int, str]] = [
         (RepeatedTestEvaluationError, 409, "test_reevaluation_requires_force"),
+        (ExplanationNotSupported, 422, "explanation_not_supported"),
         (QueueFullError, 429, "queue_full"),
         (DatasetNotFoundError, 404, "dataset_not_found"),
         (NotFoundError, 404, "not_found"),
@@ -75,6 +78,8 @@ def map_exception(exc: Exception) -> tuple[int, str]:
         (TrackingError, 409, "conflict"),
         (VisionBenchError, 400, "bad_request"),
     ]
+    if isinstance(exc, InferenceError):
+        return exc.status, exc.code
     if isinstance(exc, ArchiveRejected):
         return 422, f"archive_{exc.code}"
     if isinstance(exc, ImportPathError):

@@ -1,7 +1,9 @@
 """FastAPI application factory.
 
 The API is a thin layer: it validates input, reads state, and enqueues jobs for the single
-worker (``visionbench worker``); no training, evaluation or import runs inside a request.
+worker (``visionbench worker``); no training, evaluation or import runs inside a request. The
+one exception is single-image prediction / Grad-CAM (:mod:`visionbench.inference`), which runs
+synchronously in the thread pool with a bounded number of concurrent requests.
 There is no authentication: bind to localhost only (``visionbench serve`` refuses other hosts).
 :mod:`visionbench.api.security` protects it against cross-site requests from the user's browser
 (Host allow-list, required ``X-VisionBench-Request: 1`` header + Origin check on state-changing
@@ -29,6 +31,7 @@ from visionbench.api.security import CLIENT_HEADER, LOCAL_HOSTS, LocalRequestGua
 from visionbench.core.config import Settings, get_settings
 from visionbench.core.errors import VisionBenchError
 from visionbench.core.redact import scrub_paths
+from visionbench.inference.service import InferenceService
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +77,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         description="Local benchmarking API. No authentication: bind to 127.0.0.1 only.",
     )
     app.state.settings = settings
+    app.state.inference = InferenceService(settings)
 
     def err(status: int, code: str, message: str) -> JSONResponse:
         body = {"error": {"code": code, "message": scrub_paths(message, roots)}}
@@ -129,11 +133,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 return err(503, "not_ready", reason)
         return response_class({"status": "ready", "checks": {"data_root": "ok", "torch": "ok"}})
 
-    from visionbench.api.routes import datasets, experiments
+    from visionbench.api.routes import datasets, experiments, inference
 
     for router in (
         datasets.router,
         experiments.experiments,
+        inference.router,
         experiments.evaluations,
         experiments.comparisons,
         experiments.jobs,
