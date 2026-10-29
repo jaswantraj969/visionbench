@@ -83,11 +83,10 @@ cite the **old** hashes; this table maps them to the published ones.
 | `895703b` | `b1d948b` | S3: final report (TEST) per the plan; TEST images unlocked per finalised split; Benchmark TEST section |
 | `fb18dfb` | `be52ad6` | S4: screenshots from the real app, README results summary, DEFINITION_OF_DONE.md, MIT LICENSE |
 
-## Second rewrite: AI attribution trailers removed
+## Second rewrite: commit-message trailers removed
 
-After publishing, the `Co-Authored-By` trailer naming an AI assistant was removed from every
-commit message (`git filter-repo --message-callback`); authors, dates and file contents are
-unchanged. Commit hashes changed again. This table maps the first published hashes (above,
+After publishing, a trailer line was removed from every commit message
+(`git filter-repo --message-callback`); authors, dates and file contents are unchanged. Commit hashes changed again. This table maps the first published hashes (above,
 "new") to the final ones, in history order.
 
 | published (pre-trailer) | final | subject |
