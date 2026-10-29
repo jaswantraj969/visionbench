@@ -1,451 +1,342 @@
-# Review Packet — VB-M5
+# Review Packet — VB-M6
 
-**Task:** VB-M5, "Prediction and Grad-CAM served from the API process (with sanity checks)".
-**Dates:** 2026-10-28/29.
-**Environment:** Windows 11 Home 10.0.26300; Python 3.11.15; torch 2.14.1+cu130; NVIDIA GeForce
-RTX 3050 6GB Laptop GPU; CPU Intel64 Family 6 Model 186.
+**Task:** VB-M6, "Robustness evaluation under fixed corruptions (validation only)".
+**Date:** 2026-10-29.
+**Environment:**
+- Windows 11 Home 10.0.26300; Python 3.11.15; torch 2.14.1+cu130; NVIDIA GeForce RTX 3050 6GB
+  Laptop GPU.
+- Pillow 12.3.0 with libjpeg-turbo (JPEG library 8.0, zlib-ng 1.3.1); NumPy 2.4.6.
 
-All numbers come from commands run in this session. Scratchpad paths are written `<scratchpad>`.
-Demo numbers are **"VALIDATION images — demo, not results"**: 20 val images, which also chose
-each checkpoint, say nothing about model quality. No test-split image was used in any demo or
-check.
+All numbers come from commands run in this session. Paths under the session scratchpad are
+written as `<scratchpad>`.
+
+> **Every robustness number in this packet is VALIDATION (selection-biased) — not test
+> results.** It describes sensitivity to the four synthetic corruptions of `eurosat-c-v1` at
+> their three severities only. No model is called robust.
 
 ## Summary
 
-1. **Step 0a:** `experiments.stopped_reason` stored (additive schema v6) and set when a run
-   completes. 27 of 27 existing experiments were backfilled from their own `train.log`; no other
-   field changed (checked against a dump taken before the backfill).
-2. **Step 0b:** the full-length rerun of resnet18_scratch_64 seed 1 (`exp-20261028-090206-78eeb8`,
-   "repro-check") is **bitwise identical** to `exp-20261027-202124-e89a98`: all 10 epochs of
-   history (every field except `epoch_seconds`), all 122 tensors of `best.pt` and of `last.pt`,
-   best epoch, best value and stopped_reason. Its wall time (20.7 h) is not representative: the
-   laptop was in Modern Standby and then asleep for most of the run (section 2).
-3. **Predict and Grad-CAM work end to end** on the four real seed-0 models through
-   `visionbench serve` (CPU inference): 80 predict + gradcam pairs, an out-of-distribution
-   upload, and a TEST request refused with `403 test_split_locked`.
-4. **Geometry:** the CAM is mapped onto the original through the exact inverse of the val
-   transform. The border removed by resize 256 + centre crop 224 (23.4 % of a 64x64 tile) is
-   hatched and labelled "not seen by the model" in the overlay and reported in the response.
-5. **Sanity checks pass**, with the thresholds fixed beforehand: localization 75/75 (100 %);
-   target sensitivity mean Pearson r = −0.606; model randomization mean |Spearman ρ| = 0.129;
-   identical to a backward-hook reference implementation; no hook leaks. **The first
-   localization design failed (24/80, chance level) and was replaced** (section 4.1).
-6. **Event loop:** `GET /api/health` took 13.6 ms during a 1.5 s prediction (8.6 ms with the GPU
-   hidden). A control that runs the model on the loop took 1321 ms. Concurrency is bounded
-   (429 tested).
-7. **Lint and tests:** ruff passes; 316 passed and 1 skipped in both modes; coverage 94 %.
+1. **Step 0a:** the SmallCNN Grad-CAM target moved from `features.block4.conv` (pre-BN,
+   pre-ReLU) to `features.block4.relu` (post-ReLU, pre-pool, 8x8 at 64 px).
+   - All 12 trainable benchmark checkpoints give **bitwise-identical logits** on the 20 demo
+     images before and after the change.
+   - All-zero CAMs for small_cnn seed 0 went from **1 → 0** of 20.
+   - The CAM still equals the reference implementation, and all sanity checks pass.
+   - `gradcam_version` is now `vb-gradcam-2`.
+2. **Step 0b:** cascading randomization on the four seed-0 models. No model is flagged. The
+   chance level of |ρ| is reported, because it is 0.5 for a 2x2 CAM.
+3. **Step 0c:** `keep_awake()` is used in every long-running script.
+4. **Protocol before the first run:** commit `bf1de6e` at **06:01:25Z**; the first
+   `robustness_evaluations` row was created at **06:55:15Z**.
+5. **Materialization:** the corrupted sets are **byte-identical** across reruns and across a
+   fresh output root written by a new process: 48,600 PNGs, all 12 condition hashes equal.
+   Every model was evaluated from the same files.
+6. **Evaluation:** **15 runs x 12 conditions = 180 VAL robustness evaluations**, all on the first
+   attempt, with no failures or interruptions.
+7. **Separate storage:** clean and corrupted results are stored apart (the `evaluations` table
+   still holds 15 val rows). Clean evaluation ids are pinned. The majority baseline's corrupted
+   metrics equal its clean metrics in **36/36** pairs.
+8. **Zero test evaluations of any kind** in the whole database.
+9. **Tests:** lint clean; 338 passed and 1 skipped in both modes; coverage 92 %.
+10. **Main finding:**
+    - Gaussian noise reduces every trainable model to near chance.
+    - The two pretrained 224 px models fall the furthest under noise, blur and JPEG, and the
+      least under brightness.
+    - The direction under noise, blur and JPEG is opposite to the "upsampling smooths
+      high-frequency corruptions" mechanism described in the protocol's confound note
+      (section 6.2).
+    - An identity check confirms that the image path is not the cause.
 
 ---
 
 ## 1. Commits (local only; nothing pushed)
 
 ```
-5136b1c 2026-10-29T09:44:11+05:00 M5: predict and gradcam API endpoints, image upload parser, tests and demo script
-e5e9a6f 2026-10-29T09:24:33+05:00 M5: Grad-CAM with exact val-transform geometry, overlay and sanity checks
-ea64ec1 2026-10-29T09:23:39+05:00 M5: inference service (verified loading, LRU cache, concurrency slots, test lock)
-14305b1 2026-10-29T09:12:57+05:00 M5 step 0: stopped_reason in the DB (schema v6, backfilled); full-length repro check
+597c4dc 2026-10-29T12:49:53+05:00 M6: VAL robustness results (15 runs x 12 conditions) and docs
+25baac5 2026-10-29T12:49:53+05:00 M6: robustness driver, identity check, rename retry, check covers robustness
+d3b6f64 2026-10-29T11:16:19+05:00 M6: robustness worker job and API endpoints
+7590c03 2026-10-29T11:12:01+05:00 M6: robustness library (corruptions, materialization, evaluation, report), schema v7, CLI
+bf1de6e 2026-10-29T11:01:25+05:00 M6: freeze the eurosat-c-v1 robustness protocol (before any robustness evaluation)
+67347c3 2026-10-29T11:01:25+05:00 M6 step 0: SmallCNN Grad-CAM on the post-ReLU map; cascading randomization; keep-awake
 ```
 
-The docs and this packet are committed after these four commits.
-
-- **Order:** Step 0 → inference service → Grad-CAM → API → docs.
-- **`ea64ec1`:** contains `service.py` without the `gradcam` method; `e5e9a6f` adds it, so each
-  commit holds one layer.
-- **Step 0 tree checked alone:** exported with `git checkout-index` and run with `PYTHONPATH`
-  pointing at it (the import resolved to the exported copy): 285 passed, 1 skipped.
-- **Commits 2 and 3 checked alone:** lint, the related tests (commit 2: 29 passed, 1 skipped;
-  commit 3: 23 passed) and a predict smoke test on the real EuroSAT model.
-- **Not committed:** overlays, images, weights and `var/`.
+Order: Step 0 → robustness protocol → library + tests → API/job → driver/fix → results +
+docs (this packet last). The library and API/job trees were each exported and tested alone
+(76 passed; 94 passed).
 
 ## 2. Step 0
 
-### 2a. stopped_reason (schema v6)
+### 2a. SmallCNN target layer: before/after
 
-- **Schema:** `experiments.stopped_reason VARCHAR(32)` is an additive column (`_COLUMN_UPGRADES`).
-  It is set in `run_training` when a run completes and stays NULL for failed or cancelled runs.
-  The experiment summary in the API shows it.
-- **Tests:** the v4 → v6 upgrade test now drops the column too and checks that it comes back; the
-  early-stopping test asserts the stored value.
-- **Backfill:** `scripts/backfill_stopped_reason.py` reads the line `completed: ... stopped=<reason>`
-  in each completed run's own `train.log` and sets only `stopped_reason`.
-
-```
-backfilled 27; already set 0; not completed 0; no usable log line 0
-```
-
-- **Values:** epochs_completed 9, max_steps 8 (the pilot determinism runs), early_stopping 7,
-  baseline_fit 3.
-- **Other fields unchanged:** every other column of all 27 rows is equal to the dump taken before
-  the backfill.
-- **Consistency:** for all 15 benchmark runs the DB value equals the value in the driver log used
-  in B1.
-
-### 2b. Full-length reproducibility check (`benchmarks/eurosat-v1/repro_check.json`)
-
-`scripts/repro_check.py` reruns the frozen `resnet18_scratch_64.yaml` (sha256 checked against
-`PROTOCOL_HASHES.txt`) with seed 1 on CUDA through `visionbench train`, as a new experiment. No
-other GPU work ran meanwhile. The rerun is excluded from all benchmark results: it is not in
-`runs.json`. `run_benchmark.py check` now also covers it.
-
-| compared | reference `exp-20261027-202124-e89a98` | repro-check `exp-20261028-090206-78eeb8` |
+| | before (`vb-gradcam-1`) | after (`vb-gradcam-2`) |
 |---|---|---|
-| status / stopped_reason | completed / early_stopping | completed / early_stopping |
-| best epoch / best val_loss | 5 / 0.39823326600922476 | 5 / 0.39823326600922476 |
-| history, 10 epochs: train_loss, val_loss, val_accuracy, val_balanced_accuracy, lr, steps, is_best, train_samples, epoch | | **0 differing values** |
-| best.pt (epoch 5): 122 tensors | | **0 differing**, max abs diff 0.0, metrics identical |
-| last.pt (epoch 10): 122 tensors | | **0 differing**, max abs diff 0.0, metrics identical |
-| train_seconds | 371.7 | 68442.0 (not representative) |
+| `SmallCNN.TARGET_LAYER` | `features.block4.conv` (conv output, before BN and ReLU) | `features.block4.relu` (post-ReLU, pre-pool) |
+| feature map at 64 px | 8x8 | 8x8 |
+| logits of all 12 trainable benchmark checkpoints, 20 demo VAL images | — | **bitwise identical** to before (12/12 checkpoints, shape 20x10) |
+| all-zero CAMs, small_cnn seed 0, 20 demo VAL images | **1** (image 3, Forest_1946) | **0** |
 
-**Timing anomaly, reported and not acted on.** The Windows System log (Kernel-Power 506/507/42/107,
-Power-Troubleshooter 1) shows the following:
-- Before 09:02:04Z the laptop was in Modern Standby. The experiment was created at 09:02:06Z;
-  the script had started at 07:18:35Z.
-- It entered Modern Standby again at 09:08:17Z, during epoch 3.
-- It slept from 11:41:38Z to 03:49:34Z on 10-29.
+- **No model code changed.** The ReLU is inplace, so the module's forward output is the
+  activated tensor, and nothing modifies it afterwards.
+- **New test:** the hooked tensor equals `ReLU(BN(conv(x)))` of block4, shape (1, 256, 8, 8),
+  ≥ 0.
+- **Reference test:** it now uses a tensor backward hook plus `.backward()`. PyTorch forbids a
+  module `register_full_backward_hook` on an inplace ReLU; the first attempt failed with exactly
+  that RuntimeError. Our CAM equals the reference on the new layer.
+- **Overlays:** the small_cnn overlays were regenerated (`var/demos/m5/overlays/small_cnn_scratch_64/`)
+  and the old ones moved to `var/demos/m5/superseded_vb-gradcam-1/`. The regenerated overlays of
+  the other three models are byte-identical to M5 (60/60), and all 80 predictions are identical.
 
-So epoch 3 took 67,390 s. The other epochs took 90–154 s, against 30–52 s in the benchmark run,
-which suggests a lower power state after resume (not measured). `repro_check.py` does not ask
-Windows to stay awake; the benchmark driver does. Determinism was unaffected.
+**Grad-CAM sanity checks, old layer vs new** (synthetic task; thresholds unchanged):
 
-## 3. Design
+| check | threshold | old (`block4.conv`, M5) | new (`block4.relu`) |
+|---|---|---|---|
+| localization (peak in the disk's quadrant) | ≥ 80 % | 75/75 (100 %) | 75/75 (100 %) |
+| target sensitivity: mean Pearson r (true vs other class CAM) | < 0.5 | −0.606 over 100 pairs (50 skipped: all-zero) | −0.676 over 50 pairs (100 skipped: all-zero) |
+| model randomization: mean \|Spearman ρ\| | < 0.5 | 0.129 (8 images) | 0.160 (7 images; 1 all-zero) |
+| equals the reference implementation | allclose | yes | yes |
 
-- **Inference service** (`src/visionbench/inference/service.py`, printed in full in the
-  handover):
-  - **Loading:** only through `open_for_evaluation` + `load_for_evaluation`. The experiment must
-    be completed; then come the dataset fast verify and fingerprint, the recorded manifest, the
-    checkpoint sha256 against its artifact row, `weights_only=True`, the experiments directory
-    only, and a rebuilt val transform that must equal the recorded one.
-  - **Cache:** LRU of size `inference_cache_size` (default 2), keyed by (experiment, checkpoint
-    sha256). The checkpoint is re-hashed on every request, so a tampered file is refused and
-    never served from the cache (tested).
-  - **Device:** `cpu` by default.
-  - **Concurrency:** a semaphore with `inference_max_concurrent` slots (default 1) and a wait of
-    `inference_wait_seconds`, then `429 inference_busy`. Each model also has its own lock.
-- **Routes** (`src/visionbench/api/routes/inference.py`): `async` handlers. The body is read on
-  the event loop (multipart in memory with a byte limit, or JSON of at most 8 KiB); the model
-  work runs through `run_in_threadpool`.
-- **Test lock:** an image is refused if its relpath is in the TEST split of the experiment's
-  manifest, **or if its bytes are identical (sha256) to a test image**.
-  - The second rule is my addition. Without it, the lock would be bypassed by uploading the test
-    file or reading it from another dataset that holds the same file.
-  - Uploads are still allowed.
-  - The lock is lifted only by `VISIONBENCH_TEST_IMAGES_UNLOCKED=true` (M8).
-  - Edited or re-encoded copies are not detected (documented).
-- **Grad-CAM** (`src/visionbench/explain/gradcam.py`, printed in full in the handover):
-  - A forward hook on the registry's target layer, and the gradient of the target logit via
-    `torch.autograd.grad`.
-  - **Deviation:** the task says "forward/backward hooks". `autograd.grad` gives the same
-    gradient, a test proves equality with a backward-hook + `.backward()` implementation, and it
-    writes no `.grad` into the cached shared model.
-  - Channel weights are the spatial mean of the gradients, followed by ReLU, in eval mode.
-  - The hook is removed in `finally`.
-  - An all-zero CAM is flagged and never rescaled. In the overlay it shows the plain image with
-    the notice; there is no zero-tint.
-- **Geometry and overlay:** `explain/geometry.py` and `explain/overlay.py` (section 4.2).
+On the post-ReLU map, other-class CAMs are all-zero more often (100 of 150 pairs). That is
+expected: a ReLU'd map has no positive evidence for a class the image does not show.
 
-## 4. Sanity checks (`tests/explain/`)
+### 2b. Cascading randomization on the real seed-0 models (report only)
 
-### 4.1 Grad-CAM (thresholds fixed before running; EXPERIMENT_PROTOCOL.md section 13)
+**Setup:**
+- Images: the 20 seeded M5 demo VAL images.
+- Target: the trained model's predicted class.
+- Re-initialisation: `reset_parameters()` per stage, from the top, cumulative.
+- Measure: Spearman ρ between the trained CAM and the CAM after each stage.
+- Full table: `benchmarks/eurosat-v1/results/gradcam_cascading_randomization.md`.
 
-Output from the final test run (identical in both modes):
-
-```
-GRADCAM localization: peak in the disk's quadrant for 75/75 held-out images (100.0%); model accuracy 100.0%
-GRADCAM target sensitivity: mean Pearson r(true-class CAM, other-class CAM) = -0.606 over 100 pairs (50 pairs with an all-zero CAM skipped)
-GRADCAM model randomization: Spearman rho(trained CAM, random-weights CAM) per image = -0.055, -0.146, 0.130, -0.003, -0.184, 0.312, 0.194, -0.007; mean |rho| = 0.129; 0 image(s) with an all-zero CAM
-```
-
-- **Localization:** SmallCNN (8x8 CAM) on a synthetic task.
-  - The class is decided only by the colour of a disk (red, green or blue) placed in a random,
-    known quadrant.
-  - A white square distractor sits in a different quadrant in every image.
-  - Training: 360 images; held out: 75.
-  - Threshold: ≥ 80 %. Result: **100 %**.
-- **Target sensitivity:** threshold mean r < 0.5. Result: **−0.606**.
-  - 50 of the 150 (true, other) pairs had an all-zero CAM for the other class: no positive
-    evidence for a class the image does not show.
-  - Those pairs are skipped (correlation undefined) and counted in the output.
-- **Model randomization:** the same architecture with re-initialised weights, on 8 images.
-  Threshold: mean |ρ| < 0.5. Result: **0.129**.
-- **Reference implementation:** on 5 images our CAM equals a textbook backward-hook +
-  `.backward()` CAM (allclose).
-- **Hooks:** after 100 successful and 100 failing calls (an invalid class index fails after the
-  hook fired), no module has any hook and no parameter has a `.grad`.
-- **All-zero CAM:** a hand-built model with only negative evidence returns zeros with
-  `all_zero=True`; the positive class normalises to a maximum of 1.
-
-**The first localization design failed, and that result is reported here.**
-- **First design:** the class was the disk's QUADRANT (4 classes) and the distractor was a dark
-  square.
-- **Result:** test accuracy 100 %, but the peak hit the quadrant for only **24/80 = 30 %**
-  (chance is 25 %).
-- **Not a CAM bug:** I compared our CAMs with the independent backward-hook implementation, and
-  the maximum difference was **0.0**.
-- **Cause:** SmallCNN ends in global average pooling, so it can only read position from padding
-  effects at the borders. Its class evidence is spread across the map (visible in the printed
-  CAMs). That design tested the architecture, not the explanation.
-- **Fix:** I replaced it with the standard design above (the class depends on what the disk is;
-  the quadrant is only known) and kept the 80 % threshold. The reference-equality check is now a
-  permanent test.
-- **Also fixed in the same run:** a test bug. The hook test expected `.grad is None`, but the
-  fixture's training had left gradients; the fixture now clears them.
-
-### 4.2 Geometry (16 tests, against the real torchvision val transforms)
-
-- **Configurations:** 64 px square resize (64x64 and 100x60 originals) and resize 256 + centre
-  crop 224 (64x64, 100x60, 60x100).
-- **Round trips:** original → input → original and back are exact (1e-9).
-- **Real transform:** a 3x3 white marker in the original lands in the transformed tensor where
-  the mapping predicts it, within 1 px, at 3 positions per configuration. The resized size equals
-  torchvision's.
-- **Cropped border:** for 64x64 with resize 256 + crop 224, the resized size is 256x256, the
-  offset (16, 16), the seen box (4, 4)–(60, 60) and the unseen fraction 0.234375. A marker on
-  pixels 0–2 never reaches the tensor (max 0.0) and is reported unseen. With a scratch 64 px
-  model the same marker is seen and the unseen fraction is 0.
-- **CAM-cell mapping:** a single hot cell of a 7x7 CAM maps to the right place in the original
-  (within 1 px). The NaN fraction of the mapping equals the unseen fraction.
-- **End to end:** an API test trains a resize-256/crop-224 resnet18 (fake ImageNet weights) on
-  32 px images.
-  - The response reports resized size [256, 256], offset [16, 16], seen box (2, 2)–(30, 30) and
-    unseen fraction 1 − (28/32)².
-  - In the overlay PNG the top border rows are greyscale (unseen) with hatch pixels, and the
-    centre is coloured.
-
-### 4.3 API tests (`tests/api/test_inference_api.py`, 8 tests)
-
-**Dataset images:**
-- VAL image: 200, probabilities sorted with sum 1, the checkpoint sha256 equals the artifact row,
-  no warnings, and the note "VALIDATION". A cache miss and then a hit give deterministic results.
-- TRAIN image: allowed, with a note.
-- Baseline predict: returns the priors, with the note "does not look at the image".
-
-**Test lock:**
-- 403 `test_split_locked` for predict and gradcam of the CNN and for baseline predict. Baseline
-  gradcam gives 422 first.
-- An upload of the identical test file bytes also gives 403.
-- With `test_images_unlocked=True`: 200 and a "TEST image" warning.
-
-**Uploads:**
-- A 64x64 upload to a 32 px model gets the OOD warning; a 32x32 upload has no warning; an RGBA
-  upload gets a "converted" note.
-- Errors: a body over the byte limit gives 413 `upload_too_large`; non-image bytes and a GIF give
-  415 `unsupported_image`; a missing file part gives 422 `missing_file`; `text/plain` gives 415;
-  the pixel limit gives 413 `image_too_large`; `target_class` on predict gives 422.
-
-**Grad-CAM:**
-- Scratch model: CAM 4x4, values in [0, 1], unseen fraction 0, the limitations text present and
-  the overlay PNG ≥ 256 px. Explicit `target_class` works through both JSON and multipart.
-- `unknown_class` 422; baseline `explanation_not_supported` 422; an extra JSON field gives 422.
-
-**Service behaviour:**
-- Busy: holding the only slot gives 429 `inference_busy`.
-- LRU: with size 1, a cache miss, then a hit; a second model evicts the first; the first then
-  misses again.
-- POST without the client header: 403. Unknown experiment: 404.
-- Tampered `best.pt` after caching: 422 "sha256 mismatch", not served from the cache.
-- Event loop: see the summary. The control (`run_in_threadpool` replaced by a direct call)
-  proves that the test detects blocking.
-
-**Path hygiene:** no response body contains the absolute data root.
-
-## 5. Demos on real EuroSAT seed-0 models (CPU) — "VALIDATION images — demo, not results"
-
-**Server:** `visionbench serve --no-worker`, default settings (CPU inference, cache size 2,
-1 slot). Each demo ran on a freshly started server, so the first request per model was cold.
-
-**Image selection:**
-- `scripts/demo_inference.py` draws 2 val entries per class with `numpy.random.default_rng(0)`
-  from each class's val entries sorted by relpath.
-- The list is written to `var/demos/m5/selection.json` before any request is sent.
-- Selected images: AnnualCrop_264, AnnualCrop_545, Forest_185, Forest_1946,
-  HerbaceousVegetation_104, HerbaceousVegetation_1212, Highway_250, Highway_650,
-  Industrial_2157, Industrial_2386, Pasture_365, Pasture_536, PermanentCrop_2265,
-  PermanentCrop_870, Residential_2845, Residential_58, River_192, River_699, SeaLake_11,
-  SeaLake_39 (each `<Class>/<Class>_<n>.jpg`).
-
-**The demo ran three times on the same selection.**
-- Run 1: the legend text was cut off at the right edge.
-- Run 2: after widening the canvas to fit the text, an all-zero CAM still showed as a dark
-  tint.
-- Run 3: after showing the plain image for an all-zero CAM. This is the run reported below.
-- The predictions, confidences, CAM resolutions, unseen fractions and all-zero flags were
-  **identical in all three runs**; only the rendering changed.
-- Runs 1 and 2 remain in `var/demos/m5_run1_legend_cut/` and `var/demos/m5_run2_zero_tint/`
-  (superseded).
-
-### 5.1 Per model
-
-| model | prediction = label (of 20) | CAM resolution | unseen fraction | all-zero CAMs |
+| model (CAM) | after stage 1 (head) mean \|ρ\| | after full randomization: mean ρ / mean \|ρ\| | chance \|ρ\| | flag (> 0.5) |
 |---|---|---|---|---|
-| resnet18_scratch_64 | 17 | **2x2** | 0.0000 | 0 |
-| small_cnn_scratch_64 | 18 | 8x8 | 0.0000 | 1 |
-| resnet18_imagenet_224 | 20 | 7x7 | 0.2344 | 0 |
-| efficientnet_b0_imagenet_224 | 19 | 7x7 | 0.2344 | 0 |
+| resnet18_scratch_64 (2x2) | 0.658 | 0.059 / 0.430 | 0.500 | no |
+| small_cnn_scratch_64 (8x8) | 0.260 | −0.002 / 0.252 | 0.102 | no |
+| resnet18_imagenet_224 (7x7) | 0.370 | −0.036 / 0.194 | 0.116 | no |
+| efficientnet_b0_imagenet_224 (7x7) | 0.370 | 0.066 / 0.258 | 0.116 | no |
 
-The counts above are 20 val images and are not a measure of accuracy.
+- **Chance level:** under independence E|ρ| is 0.5 for 4 cells (exact, all 24 permutations) and
+  about 0.10–0.12 for 49 or 64 cells (simulated).
+  - resnet18_scratch_64's |ρ| is at chance for a 2x2 map at every stage, so the 0.5 flag cannot
+    be judged for it.
+  - The other models end at 0.19–0.26: above chance, below the flag. The CAMs keep some
+    input-driven structure even with random weights, as Adebayo et al. also observed.
 
-### 5.2 Per image (predicted class and its probability; ✗ = differs from the label)
+### 2c. Keep-awake
 
-| image | true | resnet18_scratch_64 | small_cnn_scratch_64 | resnet18_imagenet_224 | efficientnet_b0_imagenet_224 |
-|---|---|---|---|---|---|
-| AnnualCrop/AnnualCrop_264.jpg | AnnualCrop | AnnualCrop (0.997) | AnnualCrop (0.989) | AnnualCrop (1.000) | AnnualCrop (1.000) |
-| AnnualCrop/AnnualCrop_545.jpg | AnnualCrop | Pasture (0.956) ✗ | AnnualCrop (0.606) | AnnualCrop (0.985) | Pasture (0.974) ✗ |
-| Forest/Forest_185.jpg | Forest | Forest (0.995) | Forest (0.998) | Forest (1.000) | Forest (0.999) |
-| Forest/Forest_1946.jpg | Forest | Forest (0.995) | Forest (0.997) [CAM all zero] | Forest (0.999) | Forest (0.985) |
-| HerbaceousVegetation/HerbaceousVegetation_104.jpg | HerbaceousVegetation | HerbaceousVegetation (0.630) | HerbaceousVegetation (0.981) | HerbaceousVegetation (1.000) | HerbaceousVegetation (0.998) |
-| HerbaceousVegetation/HerbaceousVegetation_1212.jpg | HerbaceousVegetation | HerbaceousVegetation (0.519) | HerbaceousVegetation (0.889) | HerbaceousVegetation (1.000) | HerbaceousVegetation (1.000) |
-| Highway/Highway_250.jpg | Highway | Highway (0.999) | Highway (0.999) | Highway (1.000) | Highway (1.000) |
-| Highway/Highway_650.jpg | Highway | Highway (0.824) | River (0.569) ✗ | Highway (0.999) | Highway (0.997) |
-| Industrial/Industrial_2157.jpg | Industrial | Industrial (0.998) | Industrial (0.963) | Industrial (1.000) | Industrial (1.000) |
-| Industrial/Industrial_2386.jpg | Industrial | Industrial (0.976) | Industrial (0.967) | Industrial (1.000) | Industrial (1.000) |
-| Pasture/Pasture_365.jpg | Pasture | Pasture (0.658) | Pasture (0.859) | Pasture (1.000) | Pasture (0.997) |
-| Pasture/Pasture_536.jpg | Pasture | Pasture (0.998) | Pasture (1.000) | Pasture (1.000) | Pasture (1.000) |
-| PermanentCrop/PermanentCrop_2265.jpg | PermanentCrop | PermanentCrop (0.982) | PermanentCrop (0.980) | PermanentCrop (1.000) | PermanentCrop (0.999) |
-| PermanentCrop/PermanentCrop_870.jpg | PermanentCrop | PermanentCrop (0.585) | PermanentCrop (1.000) | PermanentCrop (1.000) | PermanentCrop (0.991) |
-| Residential/Residential_2845.jpg | Residential | Residential (1.000) | Residential (1.000) | Residential (1.000) | Residential (1.000) |
-| Residential/Residential_58.jpg | Residential | Residential (1.000) | Residential (1.000) | Residential (1.000) | Residential (1.000) |
-| River/River_192.jpg | River | River (0.999) | River (1.000) | River (1.000) | River (1.000) |
-| River/River_699.jpg | River | PermanentCrop (0.756) ✗ | PermanentCrop (0.699) ✗ | River (0.917) | River (0.999) |
-| SeaLake/SeaLake_11.jpg | SeaLake | Forest (0.625) ✗ | SeaLake (0.705) | SeaLake (1.000) | SeaLake (0.999) |
-| SeaLake/SeaLake_39.jpg | SeaLake | SeaLake (0.960) | SeaLake (0.979) | SeaLake (1.000) | SeaLake (0.999) |
+`visionbench.core.power.keep_awake()` (`SetThreadExecutionState`) is now called by
+`run_benchmark.py`, `repro_check.py`, `pilot_benchmark.py`, `cascading_randomization.py` and
+`run_robustness.py`.
 
-- **Wrong and confident:** two wrong predictions came with probabilities of 0.956 and 0.974
-  (AnnualCrop_545 → Pasture). Confidence is not correctness.
-- **All-zero CAM:** small_cnn's CAM for Forest_1946 is all zero (no positive evidence at the
-  target layer), although the prediction has probability 0.997. The response warns and the
-  overlay highlights nothing.
-- **Low-information classes:** SeaLake and Forest are largely low-information
-  (DATASETS.md).
+## 3. Protocol before the first robustness evaluation
 
-### 5.3 Timing on CPU (run 3; indicative; one laptop)
+| event | time (UTC) |
+|---|---|
+| robustness protocol commit `bf1de6e` (committer date `2026-10-29T11:01:25+05:00`) | **2026-10-29 06:01:25** |
+| library commit `7590c03` (schema v7 introduced) | 06:12:01 |
+| API/job commit `d3b6f64` | 06:16:19 |
+| first materialization | 06:16:36 |
+| **first `robustness_evaluations` row** (`created_at`) | **2026-10-29 06:55:15** |
+| last of the 180 rows | 07:34:24 |
 
-`model load` = `timing_ms.model_load` of the first request. That covers the verified loading
-path: dataset fast verify of 27,000 files, manifest, checkpoint hash, weights. `total` covers
-the whole service call; `forward` / `CAM` cover the model work only. Warm figures are medians of
-19 requests.
+- **DB state at the protocol commit:** the real DB was still at schema v6 and had no
+  `robustness_evaluations` table (checked right after the commit, and again after the API/job
+  commit).
+- **Protocol files unchanged:** `sha256sum -c ROBUSTNESS_HASHES.txt` reported OK for both files
+  before materialization, and `run_robustness.py` re-checked them before evaluating. Git shows
+  `bf1de6e` as the only commit touching them.
 
-| model | cold: model load ms | cold: predict total ms | cold: gradcam total ms | warm: predict total ms (forward) | warm: gradcam total ms (CAM only) |
-|---|---|---|---|---|---|
-| resnet18_scratch_64 | 6712 | 7140 | 288 | 127.4 (35.8) | 182.9 (25.9) |
-| small_cnn_scratch_64 | 6700 | 6756 | 75 | 27.5 (4.5) | 78.6 (6.3) |
-| resnet18_imagenet_224 | 6089 | 6271 | 256 | 146.2 (57.6) | 252.2 (62.1) |
-| efficientnet_b0_imagenet_224 | 7079 | 7240 | 259 | 114.1 (64.8) | 240.5 (85.3) |
-
-- **Re-hash cost:** the gap between warm total and forward is mostly the per-request checkpoint
-  re-hash (45 MB for resnet18, 1.6 MB for small_cnn) plus the DB lookups.
-- **Run-to-run variation:** times varied between demo runs; for example, warm predict for
-  resnet18_imagenet_224 was 118.6 ms in run 1 and 146.2 ms in run 3.
-- **CUDA, checked once outside the demo:** `inference_device=cuda` on resnet18_imagenet_224 and
-  Highway_250 gave the same prediction as CPU, with probabilities within 6.7e-7 and normalised
-  CAM values within 1.1e-4. Warm forward took 5.2 ms on CUDA against 52.6 ms on CPU.
-
-### 5.4 Out-of-distribution upload
-
-- **Input:** a generated 300x200 PNG with gradients, a yellow disk and a blue rectangle, not
-  EuroSAT, sent to resnet18_imagenet_224.
-- **Prediction:** **SeaLake, probability 0.995**.
-- **Warnings:** `input differs from training data (64x64 images of dataset 'eurosat-rgb');
-  prediction may be unreliable (out-of-distribution)`, plus the note that only the size is
-  compared.
-- **Unseen fraction:** 0.4896 (300x200 → 384x256 → crop 224). The overlay is
-  `var/demos/m5/overlays/ood_upload_resnet18_imagenet_224.png`.
-
-### 5.5 TEST image request (curl.exe, with the client header)
+## 4. Materialization and the hash comparison
 
 ```
-> curl.exe -s -i -X POST http://127.0.0.1:8000/api/experiments/exp-20261027-214915-e0d372/predict -H "X-VisionBench-Request: 1" -H "Content-Type: application/json" -d '{"dataset_id":"ds-61112928e412","relpath":"AnnualCrop/AnnualCrop_100.jpg"}'
-HTTP/1.1 403 Forbidden
-date: Thu, 29 Oct 2026 04:21:49 GMT
-server: uvicorn
-content-length: 192
-content-type: application/json
-vary: Origin
-x-content-type-options: nosniff
-
-{"error":{"code":"test_split_locked","message":"this image is in the TEST split of sp-55320e11726c; test images are locked until the final test evaluation (VISIONBENCH_TEST_IMAGES_UNLOCKED)"}}
+visionbench robustness materialize ds-61112928e412 sp-55320e11726c --suite benchmarks/eurosat-v1/robustness/robustness_suite.yaml --split val
 ```
 
-- **Which image:** the alphabetically first test relpath. The same request to `/gradcam` was
-  also 403 (run 1). Without the client header the request was `403 missing_client_header`.
-- **README commands:** the curl lines in the README (a val image, an upload, an upload with
-  `target_class`, the TEST request) were run as written in PowerShell 5.1 against a live server.
+| condition | condition hash (identical in runs 2, 3 and 4) |
+|---|---|
+| gaussian_noise/0.04 | `0e06fd815f1bcca79b2a9ae37557f2949af16b31fec16a9c0abd8827c4806f26` |
+| gaussian_noise/0.08 | `82576046d19e65c15e7ab8d5f628439cf5089f4924c8612c5d0fa7ced6aa830f` |
+| gaussian_noise/0.12 | `5f9cbd3fef043fa149764a33fc1e1c6981ba7b5335e4dc2f9c1ba9cb978e6c66` |
+| gaussian_blur/0.5 | `2ba756d9d7a812eb07eb6fda49c18d3364d37423aac43ba5b2fe4459b12593d3` |
+| gaussian_blur/1.0 | `94a9ef7d449a1c532680779f9e6b24127ef461ed405465f5e707064efe8af058` |
+| gaussian_blur/1.5 | `0880e258e486d3fa68cf9d207a9101b7fd043ec374fd947f0cc19c44454ed535` |
+| brightness/0.1 | `2d49319f2121beccc4c2f186248d9803c2650cc81c374a870ccac59cb29c8ab0` |
+| brightness/0.2 | `f69f4755ece42118358ddb3567b52ca4b6e5103cc06fa2772380c230c47b0baf` |
+| brightness/0.3 | `5575ce41652f6617848bfb56fbce4211c67f34a00f8acdb3740b9b0a1e844a6f` |
+| jpeg/50 | `58356494e134259dba31807aacbc0fb13395999dd53e0d886dcda478e51e9daf` |
+| jpeg/25 | `eed6d8f66049b94a901c3c2037cf85225e6ed034fd6d2ddc0225d9b6d8164ee4` |
+| jpeg/10 | `5030987a2145865a3129028793c36191f196b3c6541d27c66c0689f1cc1bc5fb` |
 
-### 5.6 Overlay files (under `var/`, not committed; 81 PNGs)
+- **Run 1 (06:16:36Z) failed:** `PermissionError [WinError 5]` while renaming the temporary
+  directory of `gaussian_blur/1.0` into place, after 4 conditions had been written.
+  - The most likely cause is the Windows indexer or antivirus briefly holding the freshly
+    written files.
+  - The temporary directory was removed by the error path, and nothing partial remained.
+  - Fix: `_rename_into_place` retries `os.replace` up to 10 times with backoff. It is in the
+    driver/fix commit and was made before any evaluation.
+- **Run 2:** verified the 4 existing conditions byte for byte and wrote the other 8.
+- **Run 3:** a new process writing to a fresh output root (`<scratchpad>/materialize_copy`):
+  all 12 conditions written, with the same 12 condition hashes.
+- **Run 4:** the canonical root, all 12 conditions **verified** (every image re-derived and
+  compared with the stored bytes).
+- **Direct comparison:** 48,600 PNG files in the canonical cache vs 48,600 in the fresh copy,
+  **identical file set and bytes: True**.
+- **During evaluation:** every condition manifest and every corrupted file was re-hashed for
+  every run before use (`load_verified_condition`).
 
-Every dataset overlay has a footer with the EuroSAT/Copernicus attribution (DATASETS.md) and
-"VALIDATION images - demo, not results".
+## 5. Evaluation runs (`benchmarks/eurosat-v1/robustness/robustness_runs.json`)
 
-- `var/demos/m5/overlays/<model>/<Class>__<Class>_<n>.png` for each of the 4 models
-  (`resnet18_scratch_64`, `small_cnn_scratch_64`, `resnet18_imagenet_224`,
-  `efficientnet_b0_imagenet_224`) and each of the 20 images:
-  - AnnualCrop__AnnualCrop_264, AnnualCrop__AnnualCrop_545
-  - Forest__Forest_185, Forest__Forest_1946
-  - HerbaceousVegetation__HerbaceousVegetation_104, HerbaceousVegetation__HerbaceousVegetation_1212
-  - Highway__Highway_250, Highway__Highway_650
-  - Industrial__Industrial_2157, Industrial__Industrial_2386
-  - Pasture__Pasture_365, Pasture__Pasture_536
-  - PermanentCrop__PermanentCrop_2265, PermanentCrop__PermanentCrop_870
-  - Residential__Residential_2845, Residential__Residential_58
-  - River__River_192, River__River_699
-  - SeaLake__SeaLake_11, SeaLake__SeaLake_39
-- `var/demos/m5/overlays/ood_upload_resnet18_imagenet_224.png`
+- **Command:** `scripts/run_robustness.py benchmarks/eurosat-v1 --split val` ran from 06:54:48Z
+  to 07:34:24Z.
+- **Execution:** sequential, one process per run, on CUDA (CPU for the baseline). Windows was
+  kept awake, and no other GPU work ran meanwhile; the GPU-hidden test run used the CPU only.
+- **Outcome:** all 15 runs `completed` on attempt 1, each "12 evaluated, 0 skipped". No
+  interruption or rerun.
+- **Clean reference:** each run's B1 `val_eval_id`, pinned.
 
-**Suggested for supervisor review.** Each one shows one property; none was chosen for looking
-good:
+**Identity check of the image path** (`scripts/robustness_identity_check.py`, CUDA):
 
-1. `var/demos/m5/overlays/resnet18_imagenet_224/Highway__Highway_250.png`: the hatched,
-   unseen 4 px border (23.4 %).
-2. `var/demos/m5/overlays/small_cnn_scratch_64/Highway__Highway_250.png`: the same image with a
-   64 px scratch model (nothing unseen, 8x8 CAM).
-3. `var/demos/m5/overlays/resnet18_scratch_64/Highway__Highway_250.png`: the same image with a
-   **2x2** CAM, too coarse to follow the road.
-4. `var/demos/m5/overlays/small_cnn_scratch_64/Forest__Forest_1946.png`: an all-zero CAM,
-   reported rather than rescaled.
-5. `var/demos/m5/overlays/efficientnet_b0_imagenet_224/AnnualCrop__AnnualCrop_545.png`: a
-   confident wrong prediction (Pasture, 0.974) with a focused-looking CAM.
-6. `var/demos/m5/overlays/ood_upload_resnet18_imagenet_224.png`: the out-of-distribution
-   upload (SeaLake 0.995; 49 % unseen).
+The original val images, re-encoded as lossless PNG and read through the same code as the
+corrupted sets, reproduce the clean predictions exactly.
 
-## 6. Lint and full test suite (after the last code change)
+```
+resnet18_scratch_64 predictions identical to clean: True | max |prob diff|: 4.999948528041373e-09
+small_cnn_scratch_64 predictions identical to clean: True | max |prob diff|: 4.999956594586852e-09
+resnet18_imagenet_224 predictions identical to clean: True | max |prob diff|: 4.999977012561235e-09
+efficientnet_b0_imagenet_224 predictions identical to clean: True | max |prob diff|: 4.999999969612645e-09
+```
+
+The remaining 5e-9 difference is the 8-decimal rounding of `predictions.csv`. I ran this check
+because of the finding below: the collapse is not caused by the PNG path, and the majority
+baseline check alone could not show that, since it never looks at an image.
+
+## 6. Results (`benchmarks/eurosat-v1/results/robustness_val.md`, printed in full in the handover)
+
+### 6.1 Headline numbers
+
+**VALIDATION (selection-biased) — not test results.** Balanced accuracy, mean ± sd over 3
+seeds:
+
+| model | clean | mean over 12 conditions | relative drop |
+|---|---|---|---|
+| efficientnet_b0_imagenet_224 | 0.9871 ± 0.0027 | 0.4395 ± 0.0025 | 0.5548 ± 0.0016 |
+| resnet18_imagenet_224 | 0.9862 ± 0.0035 | 0.5178 ± 0.0048 | 0.4749 ± 0.0063 |
+| resnet18_scratch_64 | 0.9125 ± 0.0485 | 0.5857 ± 0.0292 | 0.3580 ± 0.0124 |
+| small_cnn_scratch_64 | 0.9556 ± 0.0027 | 0.5532 ± 0.0042 | 0.4211 ± 0.0029 |
+| majority_baseline | 0.1000 | 0.1000 | 0 |
+
+### 6.2 Observations
+
+These are stated only for these corruptions. Each is backed by seed-0 paired CIs that exclude
+zero, unless noted.
+
+- **Gaussian noise:**
+  - Every trainable model drops strongly at every severity.
+  - The pretrained models are near the 0.10 chance level already at σ = 0.04 (0.21 and 0.19
+    mean); the scratch models reach 0.57 and 0.36.
+  - Under σ = 0.12 the models predict almost a single class. resnet18_imagenet's recall is 1.00
+    for Residential and ≤ 0.07 for every other class.
+- **Blur:**
+  - σ = 0.5 changes little. For small_cnn seed 0 it slightly *raises* balanced accuracy
+    (+0.0076 [+0.0033, +0.0120]). For resnet18_scratch_64 seed 0 the CI includes zero
+    (−0.0001 [−0.0049, +0.0048]).
+  - At σ = 1.0 and 1.5, the pretrained models fall further than the scratch models.
+- **JPEG:** the pretrained models fall further than the scratch models at all three qualities.
+- **Brightness:** the order reverses. At +0.3 the pretrained models keep 0.75–0.76; the scratch
+  models keep 0.33–0.44.
+- **Against the protocol's confound note:**
+  - The note describes a mechanism: upsampling 64 → 256 smooths high-frequency corruptions
+    before pretrained models see them.
+  - The measured direction under noise, blur and JPEG is the opposite.
+  - The upsampled corruption is itself a different input (for example, bilinear-upsampled noise
+    becomes spatially correlated blobs), and pretraining and resolution remain confounded.
+  - Nothing here identifies a cause. The difference between the groups must not be read as an
+    architecture or pretraining effect.
+  - The frozen protocol text is unchanged, and no amendment was made.
+- **Severity strength (a finding, not acted on):** at 64 px the lowest noise severity already
+  reduces two models to near chance, so the suite resolves little between models for noise.
+  Changing severities would require a dated amendment and rerunning every evaluation; I did not
+  do that.
+- **Low-information classes:** in the worst condition (noise 0.12 for every trainable seed-0
+  model), SeaLake keeps 0.36 recall for efficientnet_b0 and small_cnn, and Forest drops to 0.00
+  for all four. Both are flagged as largely low-information.
+- **No model is called robust,** and no model, seed or checkpoint was selected using these
+  results.
+
+## 7. No-test-evaluation check
+
+```
+$ python scripts/run_benchmark.py check benchmarks/eurosat-v1
+benchmark experiments: 15; pilot + repro-check experiments: 13
+val evaluations of benchmark experiments: 15
+test evaluations of benchmark or pilot experiments: 0
+test evaluations in the whole database: 0
+robustness val evaluations of benchmark experiments: 180
+robustness test evaluations in the whole database: 0
+OK: zero test evaluations of any kind (clean or robustness) in the whole database
+```
+
+A direct SQLite query gives:
+- `robustness_evaluations` by split: `[('val', 180)]`;
+- `evaluations` by split: `[('val', 15)]`;
+- schema version 7.
+
+## 8. Tests (after the last code change)
 
 ```
 $ ruff check . ; ruff format --check .
 All checks passed!
-118 files already formatted
+134 files already formatted
 
 $ pytest -q -rs -p no:cacheprovider --cov=visionbench
-[measured] GET /api/health while training: n=31, max=19.0 ms
-[measured] GET /api/health during a 1.5 s predict: 13.6 ms (thread pool); control with the model run on the event loop: 1321.1 ms
 torch 2.14.1+cu130; torch.cuda.is_available()=True; CUDA_VISIBLE_DEVICES=None
-SKIPPED [1] tests\data\test_scan.py:34: cannot create file symlinks here (Windows without symlink privilege / Developer Mode); directory links are covered via an NTFS junction
-316 passed, 1 skipped, 1 warning in 630.53s (0:10:30)
-TOTAL 94 % (inference/service.py 96 %, explain/gradcam.py 94 %, explain/geometry.py 97 %, explain/overlay.py 91 %, api/routes/inference.py 97 %)
+338 passed, 1 skipped, 1 warning in 340.31s (0:05:40)
+TOTAL 92 %; robustness: corruptions 89 %, evaluate 91 %, materialize 85 %, report 85 %, suite 79 %
 
 $ CUDA_VISIBLE_DEVICES=-1 pytest -q -rs -p no:cacheprovider
-[measured] GET /api/health while training: n=32, max=13.5 ms
-[measured] GET /api/health during a 1.5 s predict: 8.6 ms (thread pool); control with the model run on the event loop: 1279.6 ms
 torch 2.14.1+cu130; torch.cuda.is_available()=False; CUDA_VISIBLE_DEVICES='-1'
-SKIPPED [1] tests\data\test_scan.py:34: cannot create file symlinks here (Windows without symlink privilege / Developer Mode); directory links are covered via an NTFS junction
-316 passed, 1 skipped, 1 warning in 495.29s (0:08:15)
+338 passed, 1 skipped, 1 warning in 421.14s (0:07:01)
 ```
 
-After this run only docs and this packet changed. The no-test check still holds:
-`run_benchmark.py check` reports 0 test evaluations for the benchmark, pilot and repro-check
-experiments and 0 in the whole database.
+The skipped test is the file-symlink test, which cannot run on this machine without symlink
+privilege.
 
-## 7. Limitations and what was not done
+**New tests** (`tests/robustness/`, 21 tests, synthetic data only):
+- **Corruption behaviour:**
+  - noise variance equals σ² within 3 %;
+  - blur reduces high-frequency energy monotonically, and reflect padding keeps a flat image
+    flat;
+  - brightness raises mean V by δ and preserves the dominant channel; clipping; black → grey;
+  - lower JPEG quality → larger error and different bytes, deterministic;
+  - dtype, shape and range for every corruption; identity at near-zero severity.
+- **Seeds:** they differ by relpath, corruption, severity and base seed; noise is independent
+  across relpaths and severities.
+- **Determinism:** materializing twice gives "verified"; a second process into another root
+  gives identical files and hashes; reversed entry order gives identical files.
+- **Tampering:** a tampered PNG or condition manifest is refused.
+- **Test lock:** in the library, the CLI (exit 1, "locked") and the API (403).
+- **Storage and pairing:**
+  - the `evaluations` table is untouched;
+  - the pinned clean id is stored; another experiment's clean evaluation is refused;
+  - the paired difference point equals corrupted − clean.
+- **Pipeline behaviour:**
+  - majority baseline exactly equal, with a degenerate paired CI at 0;
+  - resumable (the second run skips all 12);
+  - report (label, scope, confounds, baseline check).
+- **API and job:** client header 403, unknown suite 404, extra field 422, not materialized 409;
+  the job runs inline, with progress 12/12 and list/detail endpoints; no path leaks.
+- **Schema:** upgrade from v6 to v7.
 
-- **Coarse CAMs:** 2x2 for resnet18_scratch_64, 7x7 at 224 px and 8x8 for small_cnn. Grad-CAM is
-  not causal and does not show correctness (the fixed text is in every response).
-- **Synthetic sanity checks only:** the sanity checks use a synthetic task and SmallCNN. They do
-  not show that the EuroSAT CAMs are faithful.
-- **Test-lock gap:** the lock misses re-encoded, resized or edited copies of test images.
-- **Concurrency:** more than one concurrent slot under real load was not tested, only the busy
-  path and the per-model locks.
-- **CUDA inference:** checked once by hand, not in the test suite.
-- **Warm request cost:** the per-request checkpoint re-hash dominates warm request time for the
-  larger models. That is the price of never serving a changed checkpoint.
-- **Overlays not stored:** overlays are returned in the response and saved only by the demo
-  script under `var/`. They are not stored as experiment artifacts; the task's design replaces
-  the plan's "overlays as artifacts".
-- **No frontend, no protocol change, no push.**
+## 9. Limitations and what was not done
+
+- **Scope:** only four synthetic corruptions at three severities, on one dataset and one split,
+  with 3 seeds. No statement about real degradations or distribution shift. TEST is untouched;
+  M8 runs it once with the same suite.
+- **JPEG reproducibility:** JPEG bytes depend on the Pillow/libjpeg build. Byte identity was
+  shown on this machine only; the versions are recorded in every condition manifest.
+- **Severity calibration:** severities were fixed before any result and were not tuned. At
+  64 px the noise severities are strong (section 6.2).
+- **No normalization:** no ImageNet-C mCE normalization; relative drops are against each run's
+  own clean VAL score.
+- **Unverified README commands:** the README's robustness commands are the ones run here. The
+  API endpoints were exercised in tests only, not with curl against a live server.
+- **Not done:** no frontend, no change to the benchmark protocol or checkpoints, no push.
