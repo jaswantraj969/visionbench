@@ -147,3 +147,20 @@ checked side by side, contrast-stretched, on 2026-10-29). Neither is flagged low
 (recorded gray std 4.51 and 12.67; the threshold is 3.0). A pHash distance of 0 therefore does not establish a duplicate on such
 tiles; grouping uses dHash only, and the audit's pHash search is evidence for review, not a
 decision.
+
+## Synthetic demo dataset (`visionbench demo-data`)
+
+**What it is:**
+- It is generated locally by `visionbench.data.demo`: no download and no third-party content.
+- Three classes: `circle`, `square` and `triangle`.
+- Each image is 32 × 32 px RGB: one filled shape in a random colour on a noisy background.
+- The default is 40 per class. The content is deterministic for a seed (default 0).
+- `demo-data <out>` writes `<out>/shapes/<class>/*.png` (for `dataset import`) and
+  `<out>/shapes.zip` (for the web upload).
+
+**Who uses it:** the Quick Start, the Docker check and the frontend end-to-end test
+(`scripts/e2e_backend.py`).
+
+**What it is not:** it has nothing to do with EuroSAT. Numbers obtained on it are pipeline
+sanity checks, **not benchmark results**.
+

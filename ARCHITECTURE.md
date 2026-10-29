@@ -36,7 +36,7 @@ inside the API process (through `visionbench.inference`, see "Inference and Grad
 | `jobs.worker` | implemented (M4, M4.1) | OS lock, recovery, claim loop, child process, heartbeat, cancel, timeouts |
 | `data.archive` | implemented (M4) | ZIP validation (central directory), safe extraction, upload import, `import_root` confinement |
 | `evaluation.latency` | implemented (M4 step 0) | split-independent latency measurement (`latency_measurements` table) |
-| `cli` | implemented (M0–M4, D1) | `env`; `dataset import\|report\|verify\|split\|list\|audit-split`; `train`; `experiments list\|show`; `evaluate`; `latency`; `compare`; `evaluations list`; `worker`; `serve` |
+| `cli` | implemented (M0–M4, D1) | `env`; `dataset import\|report\|verify\|split\|list\|audit-split`; `train`; `experiments list\|show`; `evaluate`; `latency`; `compare`; `evaluations list`; `worker`; `serve` (`--allow-non-loopback` in the container only); `demo-data`; `robustness` |
 | `data.records` | implemented (M1) | `FileRecord`, `Issue`/`IssueCategory`, NFC names, fingerprint |
 | `data.imageio` | implemented (D1) | the one image decoder: full decode + EXIF orientation (`exif_transposed`) |
 | `data.phash` | implemented (D1) | in-house 64-bit DCT pHash (audit only) |
@@ -74,6 +74,10 @@ inside the API process (through `visionbench.inference`, see "Inference and Grad
 | `robustness.evaluate` | implemented (M6) | val-selected checkpoint on every verified condition, paired with the pinned clean evaluation; resumable |
 | `robustness.report` | implemented (M6) | per-model / per-condition report over a benchmark's `runs.json` (Markdown + JSON) |
 | `core.power` | implemented (M6 step 0) | `keep_awake()` for long-running scripts (Windows) |
+| `benchmarks` | implemented (M7) | read-only views of frozen benchmark folders: hash status, runs joined with the database, fixed documents, VAL summary, final report |
+| `api.routes.benchmarks` | implemented (M7) | `GET /api/overview`, `/api/benchmarks[/{name}[/documents/{document}]]`, `/api/robustness-suites` |
+| `data.demo` | implemented (B3) | seeded synthetic shapes dataset for `visionbench demo-data` and the e2e test (not EuroSAT) |
+| `frontend/` | implemented (M7) | React + TypeScript SPA over the API (see "Frontend") |
 
 ## Data root layout
 
@@ -571,3 +575,67 @@ import root (403 `path_outside_import_root`). Only the relative path is stored.
   with `check_hash=True` into the torch hub dir (`VISIONBENCH_TORCH_HOME`, default
   `<data_root>/cache/torch`), loaded with `weights_only=True`, and the
   file's sha256 is checked against the hash prefix in its name and recorded.
+
+## Frontend (M7)
+
+`frontend/` is a single-page app: React 18, TypeScript (strict), Vite, React Router, TanStack
+Query and Recharts.
+
+**Serving:**
+- **Production:** `visionbench serve` serves `frontend/dist` from the API's own origin.
+  - A catch-all GET, registered after every router, returns files from inside `dist`, and
+    otherwise `index.html` (SPA fallback, `Cache-Control: no-cache`).
+  - `/api/...` paths that match no route keep the JSON 404.
+  - The Host check and the client-header rule apply to these responses too.
+- **Development:** Vite serves the app on `127.0.0.1:5173` and proxies `/api` to the API. That
+  origin is in `cors_origins` by default.
+
+**API layer:**
+- **Types:** `src/api/schema.d.ts` is generated from `create_app().openapi()`
+  (`npm run gen:api`). `npm run check:api` fails when it is stale.
+- **Client:** `src/api/client.ts` is the one client.
+  - It sends `X-VisionBench-Request: 1` on every mutation.
+  - It maps the error schema to user messages, with distinct texts for `test_split_locked`,
+    `inference_busy`, `queue_full`, 409, 413, 415, 422 and 429.
+  - Uploads use XHR, for progress.
+- **Hooks:** `src/api/hooks.ts` holds the TanStack Query hooks. Active jobs are polled.
+
+**Same-origin POSTs:** browsers send `Origin` on same-origin POSTs. The Origin check therefore
+accepts the API's own origin (`http(s)://` + the validated Host), as well as `cors_origins`.
+
+**What the pages guarantee:**
+- Every page has loading, empty, error and success states.
+- Every metric carries its split label ("VALIDATION (selection-biased)" or "TEST").
+- Undefined metrics are shown as undefined, never as 0.
+- TEST actions are not offered while the test split is locked.
+- EuroSAT attribution appears wherever dataset tiles do.
+- The app has no state of its own: everything comes from the API.
+
+**Tests:**
+- Vitest + Testing Library + MSW cover components and pages.
+- Playwright runs one end-to-end flow against a real backend: `scripts/e2e_backend.py`, a
+  temporary data root and the synthetic shapes dataset.
+
+## Packaging and CI
+
+**Docker:**
+- **Image (`Dockerfile`):** a Node build stage (frontend), then `python:3.11-slim`. Both are
+  pinned by digest.
+  - Dependencies come from `requirements/lock-cpu-linux.txt` (CPU torch).
+  - The image runs as a non-root user, with data in the `/data` volume and a healthcheck on
+    `/api/health`.
+  - It sets `VISIONBENCH_CONTAINER=1`, and only then does `serve --allow-non-loopback` bind to
+    `0.0.0.0` (`cli.bind_refusal`).
+- **`compose.yaml`** publishes the port on the host's `127.0.0.1` only. Inside the container the
+  Host allow-list still applies.
+
+**Lock files:**
+- `lock-cpu-linux.txt` (runtime) and `lock-dev-cpu-linux.txt` (runtime + dev tools) come from
+  `scripts/lock_cpu_linux.sh` in the pinned image.
+- `lock-dev-cu130.txt` is the Windows CUDA development environment.
+
+**CI:**
+- `scripts/linux_tests.sh` runs ruff and the full suite in the pinned image as a non-root user.
+  This exercises the POSIX branches: the `fcntl` worker lock and psutil process handling.
+- `.github/workflows/ci.yml` has four jobs: backend, frontend, e2e and docker.
+

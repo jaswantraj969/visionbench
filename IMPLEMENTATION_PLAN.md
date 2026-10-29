@@ -28,22 +28,22 @@ done only when every acceptance criterion has been demonstrated by commands exec
 - Test-split evaluation of the val-selected checkpoint; every test evaluation recorded and counted: accuracy, macro-F1, per-class precision/recall, confusion matrix, calibration (ECE), bootstrap CIs.
 - Comparison report across runs, including the majority baseline; results stored as JSON.
 
-## M4 — API, job runner, uploads (implemented; pending review)
+## M4 — API, job runner, uploads (done; hardened in M4.1)
 - Step 0: split-independent latency; `compare --eval-ids/--latency-device`; repeated test evaluation requires `--force --reason`; val selection-bias note; baseline `--checkpoint last` is an error.
 - FastAPI endpoints for datasets, uploads, splits, experiments, evaluations, latency, comparisons, jobs over the library; no ML work inside a request.
 - Single-worker job runner: SQLite job table (queued/running/completed/failed/cancelled), atomic claim, child process per job, heartbeat, progress, cooperative cancel + terminate timeout, startup recovery of interrupted jobs and orphaned experiments.
 - Secure uploads: streamed byte limit, magic check, member-name/symlink/encryption/collision/bomb/layout rules, safe extraction, cleanup in every path; `import_root` confinement.
 - Tests for job lifecycle, cancel, hard kill + recovery, every upload rejection rule, image traversal, path hygiene.
 
-## M5 — Grad-CAM
+## M5 — Grad-CAM (done: prediction + Grad-CAM in the API, sanity checks)
 - Grad-CAM for CNN models in the registry (target layer per architecture), overlays saved as artifacts; sanity check (map changes when weights are randomized).
 
-## M6 — Robustness
+## M6 — Robustness (done: suite `eurosat-c-v1`, VALIDATION evaluations)
 - Corruption suite (noise, blur, brightness, contrast, JPEG) at graded severities; accuracy-vs-severity curves per model.
 
-## M7 — Frontend
+## M7 — Frontend (done: 9 pages, unit tests, Playwright e2e)
 - React + TypeScript + Vite UI over the API: datasets, runs, comparison, Grad-CAM viewer, robustness charts; API-typed client; basic tests.
 
-## M8 — Real benchmark & packaging
+## M8 — Real benchmark & packaging (in progress: packaging done in `v1.0.0-rc1`; the single TEST evaluation follows `FINAL_ANALYSIS_PLAN.md`)
 - Benchmark on a real public dataset with documented license; results reported per protocol.
 - Dockerfile(s), passing CI, user/developer docs, screenshots.
