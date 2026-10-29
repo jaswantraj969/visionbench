@@ -340,3 +340,70 @@ privilege.
 - **Unverified README commands:** the README's robustness commands are the ones run here. The
   API endpoints were exercised in tests only, not with curl against a live server.
 - **Not done:** no frontend, no change to the benchmark protocol or checkpoints, no push.
+
+---
+
+# VB-FINAL — evidence by phase
+
+(The VB-FINAL top summary is written at the top of this file in Phase D.)
+
+## Phase 0 — M6 follow-ups (done)
+
+Commits: `b5ee799` (0a), `07b2000` (0b), `9a088bf` (0d), `6cf7de2` (0c).
+
+**0a. Robustness protocol amendment 1 (text only, dated 2026-10-29).**
+- Appended under Amendments.
+- Upsampling 64 → 256 → crop 224 scales the corruption together with the content; it does not
+  smooth the corruption relative to the content.
+- The task's "≈ 3.5 px" figure was checked and corrected. The resize scales by 256/64 = 4 and the
+  centre crop does not rescale, so a 1 px blur becomes about 4 px in the model input; 224/64 = 3.5
+  would apply only to a direct resize to 224.
+- The VAL direction (pretrained models fall further under noise, blur and JPEG) is stated as
+  consistent with the correction but not explained by it.
+- No procedure, suite, severity or evaluation changed, and nothing was rerun.
+- Old ROBUSTNESS_PROTOCOL.md sha256: `3d13075f2783c232f577f5d031fd91113922b8d01056501861cc5d3aab41794a`.
+- New sha256: `0b738cfad455673b184eee30d02aeba138a573a984b74aee3129ad8cc1f1785b`.
+- `robustness_suite.yaml` unchanged: `6d8d647f…cfbad2`.
+- The report generator's confound sentence was corrected the same way, and `results/robustness_val.md/.json`
+  were regenerated from the recorded results. The diff is exactly that one line in each file.
+
+**0b. Documentation.**
+- **pHash on dark low-texture tiles:** audit pair `a-001` was checked visually, side by side and
+  contrast-stretched. `Forest/Forest_1552.jpg` (val, recorded gray std 4.51) and
+  `River/River_1476.jpg` (train, 12.67) have pHash distance 0 and dHash distance 26. Neither is
+  low-information, and they are clearly different images (canopy vs a river with a bank).
+- **Noise severities:** every VAL noise condition is below 0.65 balanced accuracy (maximum
+  0.6495), so the noise results resolve little between models.
+
+**0c. README robustness API commands, run in PowerShell 5.1 against `visionbench serve`
+(API + worker), real data root:**
+
+```
+queued: job-20261029-080711-4d0eed
+status=completed evaluated=0 skipped=12
+rows=12
+detail: gaussian_noise/0.04 bal_acc=0.2948444444444444
+{"error":{"code":"test_split_locked","message":"robustness on the TEST split is locked until the final test evaluation (M8); set VISIONBENCH_TEST_IMAGES_UNLOCKED=true only then"}}
+```
+
+- No new rows were written: `robustness_evaluations` still holds `[('val', 180)]` and
+  `evaluations` `[('val', 15)]`.
+- The server and its worker were stopped afterwards (no python process left).
+
+**0d. Majority baseline display.**
+- `training.config.display_config` shows `"n/a"` for every TrainConfig field the baseline does
+  not use.
+- It is used by the experiment detail API (`config_display`) and by `visionbench experiments show`.
+- Stored `config_json` is unchanged (tested).
+
+**Gate 0.**
+- **Hashes:** `sha256sum -c` reports OK for all 6 benchmark protocol files and both robustness
+  files.
+- **Lint:** `ruff check` and `ruff format --check` pass.
+- **Test run 1 (working tree):** 340 passed, 1 skipped in both modes (normal 508.16 s; GPU hidden
+  410.72 s). Phase A files were being written meanwhile, so this run is not clean evidence for the
+  Phase 0 commit.
+- **Test run 2 (clean):** repeated on a `git archive` export of `6cf7de2` (the import resolved to
+  the export): normal **340 passed, 1 skipped** (334.05 s); `CUDA_VISIBLE_DEVICES=-1`
+  **340 passed, 1 skipped** (512.21 s).
+
