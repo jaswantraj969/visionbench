@@ -1,347 +1,451 @@
-# Review Packet — VB-B1
+# Review Packet — VB-M5
 
-## MORNING SUMMARY
+**Task:** VB-M5, "Prediction and Grad-CAM served from the API process (with sanity checks)".
+**Dates:** 2026-10-28/29.
+**Environment:** Windows 11 Home 10.0.26300; Python 3.11.15; torch 2.14.1+cu130; NVIDIA GeForce
+RTX 3050 6GB Laptop GPU; CPU Intel64 Family 6 Model 186.
 
-1. Completed: **all 15 protocol runs** (5 models × seeds 0/1/2), each on its **first attempt**. There were no reruns, no interruptions, no OOM and no blocked model.
-2. Also completed: 15 VAL evaluations; 8 latency measurements (cpu + cuda, seed 0); the seed-0 VAL comparison; the multi-seed VAL summary; ruff; the full suite in both modes (285 passed, 1 skipped in each).
-3. VAL balanced accuracy, mean ± sd. **VALIDATION (selection-biased) — not test results:**
-   - efficientnet_b0 0.9871 ± 0.0027
-   - resnet18 (ImageNet) 0.9862 ± 0.0035
-   - small_cnn 0.9556 ± 0.0027
-   - resnet18 (scratch, control) 0.9125 ± 0.0485
-   - majority baseline 0.1000
-4. Finding (not acted on): **5 runs reached the 25-epoch cap** (`epochs_completed`): resnet18_scratch_64 s2, small_cnn s0/s1/s2 and resnet18_imagenet_224 s2.
-5. Anomaly: resnet18_scratch_64 has a large seed spread. Seed 1 early-stopped with best epoch 5, at 0.8578, against 0.9300 and 0.9499 for the other seeds.
-6. Anomaly: training throughput dropped mid-session, from about 30 s to about 50 s per resnet18-scratch epoch from roughly 20:25Z. This is why seed 2 took 22 min. Training times are indicative only.
-7. The protocol was not amended. No config, hyperparameter, batch size, `num_workers` or AMP setting was changed, and the protocol hashes still verify.
-8. **Zero TEST evaluations exist in the whole database** (`run_benchmark.py check`; SQLite count by split: `val` 15 and nothing else).
+All numbers come from commands run in this session. Scratchpad paths are written `<scratchpad>`.
+Demo numbers are **"VALIDATION images — demo, not results"**: 20 val images, which also chose
+each checkpoint, say nothing about model quality. No test-split image was used in any demo or
+check.
+
+## Summary
+
+1. **Step 0a:** `experiments.stopped_reason` stored (additive schema v6) and set when a run
+   completes. 27 of 27 existing experiments were backfilled from their own `train.log`; no other
+   field changed (checked against a dump taken before the backfill).
+2. **Step 0b:** the full-length rerun of resnet18_scratch_64 seed 1 (`exp-20261028-090206-78eeb8`,
+   "repro-check") is **bitwise identical** to `exp-20261027-202124-e89a98`: all 10 epochs of
+   history (every field except `epoch_seconds`), all 122 tensors of `best.pt` and of `last.pt`,
+   best epoch, best value and stopped_reason. Its wall time (20.7 h) is not representative: the
+   laptop was in Modern Standby and then asleep for most of the run (section 2).
+3. **Predict and Grad-CAM work end to end** on the four real seed-0 models through
+   `visionbench serve` (CPU inference): 80 predict + gradcam pairs, an out-of-distribution
+   upload, and a TEST request refused with `403 test_split_locked`.
+4. **Geometry:** the CAM is mapped onto the original through the exact inverse of the val
+   transform. The border removed by resize 256 + centre crop 224 (23.4 % of a 64x64 tile) is
+   hatched and labelled "not seen by the model" in the overlay and reported in the response.
+5. **Sanity checks pass**, with the thresholds fixed beforehand: localization 75/75 (100 %);
+   target sensitivity mean Pearson r = −0.606; model randomization mean |Spearman ρ| = 0.129;
+   identical to a backward-hook reference implementation; no hook leaks. **The first
+   localization design failed (24/80, chance level) and was replaced** (section 4.1).
+6. **Event loop:** `GET /api/health` took 13.6 ms during a 1.5 s prediction (8.6 ms with the GPU
+   hidden). A control that runs the model on the loop took 1321 ms. Concurrency is bounded
+   (429 tested).
+7. **Lint and tests:** ruff passes; 316 passed and 1 skipped in both modes; coverage 94 %.
 
 ---
 
-**Task:** VB-B1, "Freeze the EuroSAT benchmark protocol and run validation-only training (3 seeds per model)".
-**Dates:** 2026-10-27/28. Training ran unattended overnight, under the supervisor's rules.
-**Environment:**
-- Windows 11 Home 10.0.26300, Python 3.11.15, torch 2.14.1+cu130;
-- GPU: NVIDIA GeForce RTX 3050 6GB Laptop GPU;
-- CPU: Intel64 Family 6 Model 186.
-
-All numbers below come from commands run in this session. Paths under the session scratchpad are written as `<scratchpad>`.
-
-> **Every model metric in this packet is VALIDATION (selection-biased) — not test results.**
-> Val chose each checkpoint (best `val_loss`), so these numbers overestimate performance on new data.
-
----
-
-## 1. Commits (local only; no remote, nothing pushed)
+## 1. Commits (local only; nothing pushed)
 
 ```
-ddbdae1 2026-10-28T09:53:42+05:00 B1: runs.json, VAL results and docs (eurosat-v1; validation only, no test)
-9eba5e3 2026-10-28T09:53:42+05:00 B1: summary reports stopped_reason, epoch cap and indicative time; relative log paths
-960c0a4 2026-10-28T01:10:43+05:00 B1: driver follows the supervisor's budget decision (option 3, no amendment)
-da78fe2 2026-10-28T01:07:06+05:00 B1: benchmark driver, pilot script and pilot record (eurosat-v1)
-c7d32c0 2026-10-28T00:40:35+05:00 B1: freeze the eurosat-v1 benchmark protocol (before any benchmark run)
-29ba89c 2026-10-28T00:37:51+05:00 B1 step 0: Copernicus year note, audit field rename, frozen split in DATASETS.md
+5136b1c 2026-10-29T09:44:11+05:00 M5: predict and gradcam API endpoints, image upload parser, tests and demo script
+e5e9a6f 2026-10-29T09:24:33+05:00 M5: Grad-CAM with exact val-transform geometry, overlay and sanity checks
+ea64ec1 2026-10-29T09:23:39+05:00 M5: inference service (verified loading, LRU cache, concurrency slots, test lock)
+14305b1 2026-10-29T09:12:57+05:00 M5 step 0: stopped_reason in the DB (schema v6, backfilled); full-length repro check
 ```
 
-- `29ba89c` step 0: no year in the Copernicus notice, audit field rename, frozen split in DATASETS.md.
-- `c7d32c0`: protocol, YAMLs and `PROTOCOL_HASHES.txt`, **before any experiment** (§2).
-- `da78fe2`: pilot script, driver and `pilot.json`.
-- `960c0a4`: driver follows the supervisor's budget decision (run order, resumable, interruption and OOM handling). No protocol change.
-- `9eba5e3`: driver reporting only, made after the runs and changing no run.
-  - `summary` reports epochs trained, `stopped_reason` (parsed from each run's CLI log, because the DB does not store it), indicative train time, and the list of runs at the epoch cap.
-  - `runs.json` stores log paths relative to the repo, so there is no user path.
-- `ddbdae1`: `runs.json`, `results/` and docs (README reproduction commands, EXPERIMENT_PROTOCOL link, PROJECT_STATUS, CHANGELOG).
-- This packet is committed last.
+The docs and this packet are committed after these four commits.
 
-## 2. Evidence that the protocol precedes the first run
+- **Order:** Step 0 → inference service → Grad-CAM → API → docs.
+- **`ea64ec1`:** contains `service.py` without the `gradcam` method; `e5e9a6f` adds it, so each
+  commit holds one layer.
+- **Step 0 tree checked alone:** exported with `git checkout-index` and run with `PYTHONPATH`
+  pointing at it (the import resolved to the exported copy): 285 passed, 1 skipped.
+- **Commits 2 and 3 checked alone:** lint, the related tests (commit 2: 29 passed, 1 skipped;
+  commit 3: 23 passed) and a predict smoke test on the real EuroSAT model.
+- **Not committed:** overlays, images, weights and `var/`.
 
-| Event | Time (UTC) |
-|---|---|
-| Protocol commit `c7d32c0` (author = committer date `2026-10-28T00:40:35+05:00`) | **2026-10-27 19:40:35** |
-| Earliest experiment in the DB (`exp-20261027-195104-d067aa`, a pilot run) | 2026-10-27 19:51:04 |
-| First benchmark run (`exp-20261027-201053-5f2809`, majority_baseline seed 0) | 2026-10-27 20:10:53 |
+## 2. Step 0
 
-- Just before `c7d32c0`, the experiment DB had no tables.
-- `git log` lists `c7d32c0` as the **only** commit touching `BENCHMARK_PROTOCOL.md`, `PROTOCOL_HASHES.txt` and the YAMLs. `git diff HEAD` on them is empty.
-- `sha256sum -c PROTOCOL_HASHES.txt` reports OK for all 6 files.
-- The driver re-verifies these hashes before training.
+### 2a. stopped_reason (schema v6)
+
+- **Schema:** `experiments.stopped_reason VARCHAR(32)` is an additive column (`_COLUMN_UPGRADES`).
+  It is set in `run_training` when a run completes and stays NULL for failed or cancelled runs.
+  The experiment summary in the API shows it.
+- **Tests:** the v4 → v6 upgrade test now drops the column too and checks that it comes back; the
+  early-stopping test asserts the stored value.
+- **Backfill:** `scripts/backfill_stopped_reason.py` reads the line `completed: ... stopped=<reason>`
+  in each completed run's own `train.log` and sets only `stopped_reason`.
 
 ```
-BENCHMARK_PROTOCOL.md: OK
-majority_baseline.yaml: OK
-small_cnn_scratch_64.yaml: OK
-resnet18_imagenet_224.yaml: OK
-efficientnet_b0_imagenet_224.yaml: OK
-resnet18_scratch_64.yaml: OK
+backfilled 27; already set 0; not completed 0; no usable log line 0
 ```
 
-Amendments: **none.**
+- **Values:** epochs_completed 9, max_steps 8 (the pilot determinism runs), early_stopping 7,
+  baseline_fit 3.
+- **Other fields unchanged:** every other column of all 27 rows is equal to the dump taken before
+  the backfill.
+- **Consistency:** for all 15 benchmark runs the DB value equals the value in the driver log used
+  in B1.
 
-## 3. Pilot (excluded from all results; `benchmarks/eurosat-v1/pilot.json`)
+### 2b. Full-length reproducibility check (`benchmarks/eurosat-v1/repro_check.json`)
 
-The pilot ran from 19:50:46Z to 20:06:11Z, with 12 pilot experiments.
+`scripts/repro_check.py` reruns the frozen `resnet18_scratch_64.yaml` (sha256 checked against
+`PROTOCOL_HASHES.txt`) with seed 1 on CUDA through `visionbench train`, as a new experiment. No
+other GPU work ran meanwhile. The rerun is excluded from all benchmark results: it is not in
+`runs.json`. `run_benchmark.py check` now also covers it.
 
-**Timing:** 1 epoch, seed 0, batch 64, 296 steps per epoch, each in a fresh process.
-
-| model | epoch s (train + val) | peak GPU MiB (`max_memory_allocated`) | batch 64 fits | process wall s | experiment |
-|---|---|---|---|---|---|
-| small_cnn_scratch_64 | 56.30 | 242.0 | yes | 117.77 | exp-20261027-195104-d067aa |
-| resnet18_imagenet_224 | 178.43 | 1594.6 | yes | 203.58 | exp-20261027-195257-71ff25 |
-| efficientnet_b0_imagenet_224 | 256.59 | 5597.0 | yes | 281.81 | exp-20261027-195620-f1a5b1 |
-| resnet18_scratch_64 | 31.55 | 345.1 | yes | 39.24 | exp-20261027-200055-e5454a |
-
-- The budget upper bound, with every run at 25 epochs, was 10.99 h, over the 6 h limit.
-- The supervisor chose option 3: the longer budget, no amendment.
-- The actual training wall time was 20:10:44Z → 04:15:10Z, **8 h 04 min**.
-
-**GPU determinism:** two identical CLI runs per model (seed 0, `max_steps` 50, separate processes), compared bitwise.
-
-| model | runs | history (train_loss, val_loss, val_acc, val_bal_acc, steps) identical | best.pt tensors | differing | max abs diff |
-|---|---|---|---|---|---|
-| small_cnn_scratch_64 | 200135-3899f9 / 200150-c2cda6 | yes | 26 | 0 | 0.0 |
-| resnet18_imagenet_224 | 200206-c48f45 / 200247-2922d3 | yes | 122 | 0 | 0.0 |
-| efficientnet_b0_imagenet_224 | 200329-f8e6f2 / 200432-7e3622 | yes | 360 | 0 | 0.0 |
-| resnet18_scratch_64 | 200540-23c1f7 / 200559-c3d495 | yes | 122 | 0 | 0.0 |
-
-The pilot verified determinism **bitwise**, so a rerun with the identical config reproduces a run exactly. No rerun was needed in B1.
-
-Caveat: bitwise identity was verified on 50-step runs. Full 25-epoch runs use the same deterministic settings but were not run twice.
-
-## 4. Runs (`benchmarks/eurosat-v1/runs.json`)
-
-| # | model | seed | attempt | experiment | status | epochs trained | stopped_reason | best epoch | started → finished (UTC) |
-|---|---|---|---|---|---|---|---|---|---|
-| 0 | majority_baseline | 0 | 1 | exp-20261027-201053-5f2809 | completed | 1 | baseline_fit | 1 | 10-27 20:10:44 → 20:10:54 |
-| 1 | majority_baseline | 1 | 1 | exp-20261027-201101-632b02 | completed | 1 | baseline_fit | 1 | 10-27 20:10:55 → 20:11:02 |
-| 2 | majority_baseline | 2 | 1 | exp-20261027-201108-703436 | completed | 1 | baseline_fit | 1 | 10-27 20:11:02 → 20:11:09 |
-| 3 | resnet18_scratch_64 | 0 | 1 | exp-20261027-201115-e384ed | completed | 17 | early_stopping | 12 | 10-27 20:11:09 → 20:21:17 |
-| 4 | resnet18_scratch_64 | 1 | 1 | exp-20261027-202124-e89a98 | completed | 10 | early_stopping | 5 | 10-27 20:21:17 → 20:27:38 |
-| 5 | resnet18_scratch_64 | 2 | 1 | exp-20261027-202749-e42275 | completed | 25 | epochs_completed | 25 | 10-27 20:27:38 → 20:49:45 |
-| 6 | small_cnn_scratch_64 | 0 | 1 | exp-20261027-204957-d42310 | completed | 25 | epochs_completed | 25 | 10-27 20:49:45 → 21:10:53 |
-| 7 | small_cnn_scratch_64 | 1 | 1 | exp-20261027-211106-cc7c83 | completed | 25 | epochs_completed | 25 | 10-27 21:10:53 → 21:32:28 |
-| 8 | small_cnn_scratch_64 | 2 | 1 | exp-20261027-213240-d42c79 | completed | 25 | epochs_completed | 23 | 10-27 21:32:28 → 21:48:49 |
-| 9 | resnet18_imagenet_224 | 0 | 1 | exp-20261027-214915-e0d372 | completed | 25 | early_stopping | 20 | 10-27 21:49:02 → 22:56:57 |
-| 10 | resnet18_imagenet_224 | 1 | 1 | exp-20261027-225711-6db256 | completed | 13 | early_stopping | 8 | 10-27 22:56:58 → 23:34:39 |
-| 11 | resnet18_imagenet_224 | 2 | 1 | exp-20261027-233452-43080e | completed | 25 | epochs_completed | 21 | 10-27 23:34:39 → 00:47:01 |
-| 12 | efficientnet_b0_imagenet_224 | 0 | 1 | exp-20261028-004715-3da317 | completed | 10 | early_stopping | 5 | 10-28 00:47:01 → 01:38:13 |
-| 13 | efficientnet_b0_imagenet_224 | 1 | 1 | exp-20261028-013827-6cbab1 | completed | 17 | early_stopping | 12 | 10-28 01:38:13 → 03:01:37 |
-| 14 | efficientnet_b0_imagenet_224 | 2 | 1 | exp-20261028-030154-fe104a | completed | 15 | early_stopping | 10 | 10-28 03:01:37 → 04:15:10 |
-
-- Every run has `attempt` 1 and `status` completed, with no errors.
-- No interruption, failure or rerun is recorded.
-- `config_sha256` matches `PROTOCOL_HASHES.txt` for every run.
-- `stopped_reason` is not a DB column. It is parsed from the CLI's final line in each run's log under `var/benchmarks/eurosat-v1/logs/`.
-
-### 4.1 Runs that ended at the 25-epoch cap: a finding, not acted on
-
-| run | experiment | best epoch |
+| compared | reference `exp-20261027-202124-e89a98` | repro-check `exp-20261028-090206-78eeb8` |
 |---|---|---|
-| resnet18_scratch_64 seed 2 | exp-20261027-202749-e42275 | 25 |
-| small_cnn_scratch_64 seed 0 | exp-20261027-204957-d42310 | 25 |
-| small_cnn_scratch_64 seed 1 | exp-20261027-211106-cc7c83 | 25 |
-| small_cnn_scratch_64 seed 2 | exp-20261027-213240-d42c79 | 23 |
-| resnet18_imagenet_224 seed 2 | exp-20261027-233452-43080e | 21 |
+| status / stopped_reason | completed / early_stopping | completed / early_stopping |
+| best epoch / best val_loss | 5 / 0.39823326600922476 | 5 / 0.39823326600922476 |
+| history, 10 epochs: train_loss, val_loss, val_accuracy, val_balanced_accuracy, lr, steps, is_best, train_samples, epoch | | **0 differing values** |
+| best.pt (epoch 5): 122 tensors | | **0 differing**, max abs diff 0.0, metrics identical |
+| last.pt (epoch 10): 122 tensors | | **0 differing**, max abs diff 0.0, metrics identical |
+| train_seconds | 371.7 | 68442.0 (not representative) |
 
-- In 3 of these 5 runs the best epoch is the last epoch (25), and in a 4th it is epoch 23. Their val loss was still falling at the cap, so a larger epoch cap might have helped them. Testing that would require a protocol amendment and reruns of all seeds; per the instructions, I took no action.
-- `resnet18_imagenet_224` seed 0 also trained 25 epochs, but it stopped through **early stopping**: its best epoch was 20, and patience 5 ran out exactly at epoch 25. It is not counted as capped.
+**Timing anomaly, reported and not acted on.** The Windows System log (Kernel-Power 506/507/42/107,
+Power-Troubleshooter 1) shows the following:
+- Before 09:02:04Z the laptop was in Modern Standby. The experiment was created at 09:02:06Z;
+  the script had started at 07:18:35Z.
+- It entered Modern Standby again at 09:08:17Z, during epoch 3.
+- It slept from 11:41:38Z to 03:49:34Z on 10-29.
 
-### 4.2 Why resnet18_scratch_64 seed 2 took ~22 min (vs 6–10 min)
+So epoch 3 took 67,390 s. The other epochs took 90–154 s, against 30–52 s in the benchmark run,
+which suggests a lower power state after resume (not measured). `repro_check.py` does not ask
+Windows to stay awake; the benchmark driver does. Determinism was unaffected.
 
-This comes from the epoch histories in its CLI log. There are two causes:
+## 3. Design
 
-1. **More epochs: 25, against 17 (seed 0) and 10 (seed 1).**
-   - Seed 2's val_loss kept setting new bests late in training, at epochs 16, 17, 18, 19, 23, 24 and 25. Five non-improving epochs in a row never happened, so it ran to the cap with `epochs_completed`.
-   - Seed 0 stopped after epoch 17 (best epoch 12).
-   - Seed 1 stopped after epoch 10 (best epoch 5).
-2. **Slower epochs: about 51 s, against about 30 s.**
-   - Every seed 2 epoch took 50–53 s (sum 1305.8 s; mean 52.2 s).
-   - Most epochs of seeds 0 and 1 took 30–32 s.
-   - The slowdown is not specific to the run: it began mid-session, around 20:25Z. Seed 0's epochs 13–15 (49–53 s) and seed 1's epochs 8–10 (50–52 s) were already slow, and seed 2 started at 20:27:38Z.
-   - The likely cause is the laptop's thermal or power state, or another load on the machine; I did not measure which.
-   - Training is deterministic, so this affects time only, not results.
+- **Inference service** (`src/visionbench/inference/service.py`, printed in full in the
+  handover):
+  - **Loading:** only through `open_for_evaluation` + `load_for_evaluation`. The experiment must
+    be completed; then come the dataset fast verify and fingerprint, the recorded manifest, the
+    checkpoint sha256 against its artifact row, `weights_only=True`, the experiments directory
+    only, and a rebuilt val transform that must equal the recorded one.
+  - **Cache:** LRU of size `inference_cache_size` (default 2), keyed by (experiment, checkpoint
+    sha256). The checkpoint is re-hashed on every request, so a tampered file is refused and
+    never served from the cache (tested).
+  - **Device:** `cpu` by default.
+  - **Concurrency:** a semaphore with `inference_max_concurrent` slots (default 1) and a wait of
+    `inference_wait_seconds`, then `429 inference_busy`. Each model also has its own lock.
+- **Routes** (`src/visionbench/api/routes/inference.py`): `async` handlers. The body is read on
+  the event loop (multipart in memory with a byte limit, or JSON of at most 8 KiB); the model
+  work runs through `run_in_threadpool`.
+- **Test lock:** an image is refused if its relpath is in the TEST split of the experiment's
+  manifest, **or if its bytes are identical (sha256) to a test image**.
+  - The second rule is my addition. Without it, the lock would be bypassed by uploading the test
+    file or reading it from another dataset that holds the same file.
+  - Uploads are still allowed.
+  - The lock is lifted only by `VISIONBENCH_TEST_IMAGES_UNLOCKED=true` (M8).
+  - Edited or re-encoded copies are not detected (documented).
+- **Grad-CAM** (`src/visionbench/explain/gradcam.py`, printed in full in the handover):
+  - A forward hook on the registry's target layer, and the gradient of the target logit via
+    `torch.autograd.grad`.
+  - **Deviation:** the task says "forward/backward hooks". `autograd.grad` gives the same
+    gradient, a test proves equality with a backward-hook + `.backward()` implementation, and it
+    writes no `.grad` into the cached shared model.
+  - Channel weights are the spatial mean of the gradients, followed by ReLU, in eval mode.
+  - The hook is removed in `finally`.
+  - An all-zero CAM is flagged and never rescaled. In the overlay it shows the plain image with
+    the notice; there is no zero-tint.
+- **Geometry and overlay:** `explain/geometry.py` and `explain/overlay.py` (section 4.2).
 
-Together: 25 epochs × about 52 s = 1306 s of epochs, which gives the **1314 s** `train_seconds`.
+## 4. Sanity checks (`tests/explain/`)
 
-## 5. VAL comparison, seed 0 of every model (`results/val_comparison_seed0.md`)
+### 4.1 Grad-CAM (thresholds fixed before running; EXPERIMENT_PROTOCOL.md section 13)
 
-**VALIDATION (selection-biased) — not test results.**
-- Command: `visionbench compare <5 seed-0 experiments> --split val --eval-ids <their val evaluations> --latency-device cuda --note "VALIDATION (selection-biased) — not test results. …"`
-- Report: `rp-20261028-042730-bddd0b`.
-- Confound flags: `input_resolution_differs`, `pretrained_vs_scratch`.
+Output from the final test run (identical in both modes):
 
-### Model comparison (val split)
+```
+GRADCAM localization: peak in the disk's quadrant for 75/75 held-out images (100.0%); model accuracy 100.0%
+GRADCAM target sensitivity: mean Pearson r(true-class CAM, other-class CAM) = -0.606 over 100 pairs (50 pairs with an all-zero CAM skipped)
+GRADCAM model randomization: Spearman rho(trained CAM, random-weights CAM) per image = -0.055, -0.146, 0.130, -0.003, -0.184, 0.312, 0.194, -0.007; mean |rho| = 0.129; 0 image(s) with an all-zero CAM
+```
 
-> **VALIDATION (selection-biased) — not test results. eurosat-v1 benchmark, seed 0 of each protocol model (UI/demo rule); checkpoints were selected on this val split. Pretraining and input resolution are confounded (control: resnet18_scratch_64).**
+- **Localization:** SmallCNN (8x8 CAM) on a synthetic task.
+  - The class is decided only by the colour of a disk (red, green or blue) placed in a random,
+    known quadrant.
+  - A white square distractor sits in a different quadrant in every image.
+  - Training: 360 images; held out: 75.
+  - Threshold: ≥ 80 %. Result: **100 %**.
+- **Target sensitivity:** threshold mean r < 0.5. Result: **−0.606**.
+  - 50 of the 150 (true, other) pairs had an all-zero CAM for the other class: no positive
+    evidence for a class the image does not show.
+  - Those pairs are skipped (correlation undefined) and counted in the output.
+- **Model randomization:** the same architecture with re-initialised weights, on 8 images.
+  Threshold: mean |ρ| < 0.5. Result: **0.129**.
+- **Reference implementation:** on 5 images our CAM equals a textbook backward-hook +
+  `.backward()` CAM (allclose).
+- **Hooks:** after 100 successful and 100 failing calls (an invalid class index fails after the
+  hook fired), no module has any hook and no parameter has a `.grad`.
+- **All-zero CAM:** a hand-built model with only negative evidence returns zeros with
+  `all_zero=True`; the positive class normalises to a maximum of 1.
 
-- Report: `rp-20261028-042730-bddd0b` (2026-10-28T04:27:30+00:00, visionbench 0.0.1)
-- Dataset: `ds-61112928e412` (fingerprint `53a853ae82ee65dd…`), split `sp-55320e11726c`, 4050 val samples, classes: AnnualCrop, Forest, HerbaceousVegetation, Highway, Industrial, Pasture, PermanentCrop, Residential, River, SeaLake
-- Reference for paired differences: `exp-20261027-201053-5f2809`
+**The first localization design failed, and that result is reported here.**
+- **First design:** the class was the disk's QUADRANT (4 classes) and the distractor was a dark
+  square.
+- **Result:** test accuracy 100 %, but the peak hit the quadrant for only **24/80 = 30 %**
+  (chance is 25 %).
+- **Not a CAM bug:** I compared our CAMs with the independent backward-hook implementation, and
+  the maximum difference was **0.0**.
+- **Cause:** SmallCNN ends in global average pooling, so it can only read position from padding
+  effects at the borders. Its class evidence is spread across the map (visible in the printed
+  CAMs). That design tested the architecture, not the explanation.
+- **Fix:** I replaced it with the standard design above (the class depends on what the disk is;
+  the quadrant is only known) and kept the 80 % threshold. The reference-equality check is now a
+  permanent test.
+- **Also fixed in the same run:** a test bug. The hook test expected `.grad is None`, but the
+  fixture's training had left gradients; the fixture now clears them.
 
-**Selection bias:** validation metrics are selection-biased: the same validation data chose each model's checkpoint (early stopping / best epoch), so they overestimate performance on new data
+### 4.2 Geometry (16 tests, against the real torchvision val transforms)
 
-Latency: model forward pass only, measured on **cuda** only (`visionbench latency`); other devices are never mixed in.
+- **Configurations:** 64 px square resize (64x64 and 100x60 originals) and resize 256 + centre
+  crop 224 (64x64, 100x60, 60x100).
+- **Round trips:** original → input → original and back are exact (1e-9).
+- **Real transform:** a 3x3 white marker in the original lands in the transformed tensor where
+  the mapping predicts it, within 1 px, at 3 positions per configuration. The resized size equals
+  torchvision's.
+- **Cropped border:** for 64x64 with resize 256 + crop 224, the resized size is 256x256, the
+  offset (16, 16), the seen box (4, 4)–(60, 60) and the unseen fraction 0.234375. A marker on
+  pixels 0–2 never reaches the tensor (max 0.0) and is reported unseen. With a scratch 64 px
+  model the same marker is seen and the unseen fraction is 0.
+- **CAM-cell mapping:** a single hot cell of a 7x7 CAM maps to the right place in the original
+  (within 1 px). The NaN fraction of the mapping equals the unseen fraction.
+- **End to end:** an API test trains a resize-256/crop-224 resnet18 (fake ImageNet weights) on
+  32 px images.
+  - The response reports resized size [256, 256], offset [16, 16], seen box (2, 2)–(30, 30) and
+    unseen fraction 1 − (28/32)².
+  - In the overlay PNG the top border rows are greyscale (unseen) with hatch pixels, and the
+    centre is coloured.
 
-#### Models
+### 4.3 API tests (`tests/api/test_inference_api.py`, 8 tests)
 
-| experiment | model | weights | input px | params | ckpt bytes | latency bs1 (median ms, device) | train s | best epoch | val selection | val bal. acc |
-|---|---|---|---|---|---|---|---|---|---|---|
-| `exp-20261027-201053-5f2809` | majority_baseline | none | n/a | n/a | 929 | n/a: majority_baseline has no forward pass | 0.2 | 1 | val_loss=2.2948 | 0.1000 |
-| `exp-20261027-201115-e384ed` | resnet18 | scratch | 64 | 11181642 | 44794891 | 4.288 (cuda) | 600.9 | 12 | val_loss=0.1906 | 0.9300 |
-| `exp-20261027-204957-d42310` | small_cnn | scratch | 64 | 391466 | 1576885 | 1.730 (cuda) | 1254.7 | 25 | val_loss=0.1166 | 0.9588 |
-| `exp-20261027-214915-e0d372` | resnet18 | imagenet | 224 | 11181642 | 44794891 | 4.061 (cuda) | 4060.2 | 20 | val_loss=0.0383 | 0.9869 |
-| `exp-20261028-004715-3da317` | efficientnet_b0 | imagenet | 224 | 4020358 | 16340197 | 13.526 (cuda) | 3056.0 | 5 | val_loss=0.0430 | 0.9840 |
+**Dataset images:**
+- VAL image: 200, probabilities sorted with sum 1, the checkpoint sha256 equals the artifact row,
+  no warnings, and the note "VALIDATION". A cache miss and then a hit give deterministic results.
+- TRAIN image: allowed, with a note.
+- Baseline predict: returns the priors, with the note "does not look at the image".
 
-#### Val metrics
+**Test lock:**
+- 403 `test_split_locked` for predict and gradcam of the CNN and for baseline predict. Baseline
+  gradcam gives 422 first.
+- An upload of the identical test file bytes also gives 403.
+- With `test_images_unlocked=True`: 200 and a "TEST image" warning.
 
-Point value [95% percentile bootstrap CI] from each evaluation (1000 resamples, seed 0).
+**Uploads:**
+- A 64x64 upload to a 32 px model gets the OOD warning; a 32x32 upload has no warning; an RGBA
+  upload gets a "converted" note.
+- Errors: a body over the byte limit gives 413 `upload_too_large`; non-image bytes and a GIF give
+  415 `unsupported_image`; a missing file part gives 422 `missing_file`; `text/plain` gives 415;
+  the pixel limit gives 413 `image_too_large`; `target_class` on predict gives 422.
 
-| experiment | model | checkpoint | accuracy | balanced accuracy | macro F1 | test evaluations so far |
-|---|---|---|---|---|---|---|
-| `exp-20261027-201053-5f2809` | majority_baseline | baseline (pinned `ev-20261028-041748-ef337a`) | 0.1111 [0.1012, 0.1207] | 0.1000 [0.1000, 0.1000] | 0.0200 [0.0184, 0.0215] | 0 |
-| `exp-20261027-201115-e384ed` | resnet18 | best (pinned `ev-20261028-042026-b5cb93`) | 0.9321 [0.9247, 0.9395] | 0.9300 [0.9222, 0.9376] | 0.9305 [0.9227, 0.9381] | 0 |
-| `exp-20261027-204957-d42310` | small_cnn | best (pinned `ev-20261028-042134-cf3fb5`) | 0.9605 [0.9546, 0.9664] | 0.9588 [0.9526, 0.9649] | 0.9596 [0.9536, 0.9656] | 0 |
-| `exp-20261027-214915-e0d372` | resnet18 | best (pinned `ev-20261028-041854-e1bd88`) | 0.9877 [0.9842, 0.9911] | 0.9869 [0.9829, 0.9905] | 0.9873 [0.9836, 0.9908] | 0 |
-| `exp-20261028-004715-3da317` | efficientnet_b0 | best (pinned `ev-20261028-041610-12527c`) | 0.9847 [0.9807, 0.9884] | 0.9840 [0.9798, 0.9879] | 0.9844 [0.9803, 0.9881] | 0 |
+**Grad-CAM:**
+- Scratch model: CAM 4x4, values in [0, 1], unseen fraction 0, the limitations text present and
+  the overlay PNG ≥ 256 px. Explicit `target_class` works through both JSON and multipart.
+- `unknown_class` 422; baseline `explanation_not_supported` 422; an extra JSON field gives 422.
 
-#### Paired differences vs reference `exp-20261027-201053-5f2809`
+**Service behaviour:**
+- Busy: holding the only slot gives 429 `inference_busy`.
+- LRU: with size 1, a cache miss, then a hit; a second model evicts the first; the first then
+  misses again.
+- POST without the client header: 403. Unknown experiment: 404.
+- Tampered `best.pt` after caching: 422 "sha256 mismatch", not served from the cache.
+- Event loop: see the summary. The control (`run_in_threadpool` replaced by a direct call)
+  proves that the test detects blocking.
 
-Paired percentile bootstrap: 1000 resamples, seed 0, the same resampled indices for both models; difference = experiment − reference.
+**Path hygiene:** no response body contains the absolute data root.
 
-| experiment | model | Δ balanced accuracy [95% CI] | Δ macro F1 [95% CI] |
-|---|---|---|---|
-| `exp-20261027-201115-e384ed` | resnet18 | 0.8300 [0.8222, 0.8376] | 0.9105 [0.9023, 0.9181] |
-| `exp-20261027-204957-d42310` | small_cnn | 0.8588 [0.8526, 0.8649] | 0.9396 [0.9333, 0.9458] |
-| `exp-20261027-214915-e0d372` | resnet18 | 0.8869 [0.8829, 0.8905] | 0.9673 [0.9632, 0.9709] |
-| `exp-20261028-004715-3da317` | efficientnet_b0 | 0.8840 [0.8798, 0.8879] | 0.9644 [0.9601, 0.9685] |
+## 5. Demos on real EuroSAT seed-0 models (CPU) — "VALIDATION images — demo, not results"
 
-#### Validation ranking
+**Server:** `visionbench serve --no-worker`, default settings (CPU inference, cache size 2,
+1 slot). Each demo ran on a freshly started server, so the first request per model was cold.
 
-Basis: validation balanced accuracy at the val-selected epoch (VAL only).
+**Image selection:**
+- `scripts/demo_inference.py` draws 2 val entries per class with `numpy.random.default_rng(0)`
+  from each class's val entries sorted by relpath.
+- The list is written to `var/demos/m5/selection.json` before any request is sent.
+- Selected images: AnnualCrop_264, AnnualCrop_545, Forest_185, Forest_1946,
+  HerbaceousVegetation_104, HerbaceousVegetation_1212, Highway_250, Highway_650,
+  Industrial_2157, Industrial_2386, Pasture_365, Pasture_536, PermanentCrop_2265,
+  PermanentCrop_870, Residential_2845, Residential_58, River_192, River_699, SeaLake_11,
+  SeaLake_39 (each `<Class>/<Class>_<n>.jpg`).
 
-- rank 1: `exp-20261027-214915-e0d372` resnet18: 0.9869
-- rank 2: `exp-20261028-004715-3da317` efficientnet_b0: 0.9840
-- rank 3: `exp-20261027-204957-d42310` small_cnn: 0.9588
-- rank 4: `exp-20261027-201115-e384ed` resnet18: 0.9300
-- rank 5: `exp-20261027-201053-5f2809` majority_baseline: 0.1000
+**The demo ran three times on the same selection.**
+- Run 1: the legend text was cut off at the right edge.
+- Run 2: after widening the canvas to fit the text, an all-zero CAM still showed as a dark
+  tint.
+- Run 3: after showing the plain image for an all-zero CAM. This is the run reported below.
+- The predictions, confidences, CAM resolutions, unseen fractions and all-zero flags were
+  **identical in all three runs**; only the rendering changed.
+- Runs 1 and 2 remain in `var/demos/m5_run1_legend_cut/` and `var/demos/m5_run2_zero_tint/`
+  (superseded).
 
-#### Confound flags
+### 5.1 Per model
 
-- **input_resolution_differs**: models see different input resolutions; architecture and resolution are confounded. Values: `{"exp-20261027-201115-e384ed": 64, "exp-20261027-204957-d42310": 64, "exp-20261027-214915-e0d372": 224, "exp-20261028-004715-3da317": 224}`
-- **pretrained_vs_scratch**: ImageNet-pretrained and scratch models are compared; pretraining is a confound. Values: `{"exp-20261027-201115-e384ed": "scratch", "exp-20261027-204957-d42310": "scratch", "exp-20261027-214915-e0d372": "imagenet", "exp-20261028-004715-3da317": "imagenet"}`
+| model | prediction = label (of 20) | CAM resolution | unseen fraction | all-zero CAMs |
+|---|---|---|---|---|
+| resnet18_scratch_64 | 17 | **2x2** | 0.0000 | 0 |
+| small_cnn_scratch_64 | 18 | 8x8 | 0.0000 | 1 |
+| resnet18_imagenet_224 | 20 | 7x7 | 0.2344 | 0 |
+| efficientnet_b0_imagenet_224 | 19 | 7x7 | 0.2344 | 0 |
 
-## 6. Multi-seed VAL summary (`results/val_summary.md`)
+The counts above are 20 val images and are not a measure of accuracy.
 
-### eurosat-v1: multi-seed summary — VALIDATION (selection-biased) — not test results
+### 5.2 Per image (predicted class and its probability; ✗ = differs from the label)
 
-**VALIDATION (selection-biased) — not test results.** Checkpoints were selected on this same validation split (best val_loss), so these numbers are optimistic. Mean ± sample sd over seeds 0/1/2 (n = 3); the split is fixed, so the sd reflects training variance only.
-
-| model | val balanced accuracy (mean ± sd) | val macro F1 (mean ± sd) | per-seed bal. acc. (s0 / s1 / s2) | per-seed macro F1 (s0 / s1 / s2) | best epoch (s0/s1/s2) | epochs trained (s0/s1/s2) | stopped_reason (s0/s1/s2) | train time s, indicative (s0/s1/s2) |
-|---|---|---|---|---|---|---|---|---|
-| majority_baseline | 0.1000 ± 0.0000 | 0.0200 ± 0.0000 | 0.1000 / 0.1000 / 0.1000 | 0.0200 / 0.0200 / 0.0200 | 1 / 1 / 1 | 1 / 1 / 1 | baseline_fit / baseline_fit / baseline_fit | 0 / 0 / 0 |
-| resnet18_scratch_64 | 0.9125 ± 0.0485 | 0.9127 ± 0.0488 | 0.9300 / 0.8578 / 0.9499 | 0.9305 / 0.8575 / 0.9502 | 12 / 5 / 25 | 17 / 10 / 25 | early_stopping / early_stopping / epochs_completed | 601 / 372 / 1314 |
-| small_cnn_scratch_64 | 0.9556 ± 0.0027 | 0.9563 ± 0.0029 | 0.9588 / 0.9542 / 0.9538 | 0.9596 / 0.9547 / 0.9545 | 25 / 25 / 23 | 25 / 25 / 25 | epochs_completed / epochs_completed / epochs_completed | 1255 / 1280 / 969 |
-| resnet18_imagenet_224 | 0.9862 ± 0.0035 | 0.9864 ± 0.0036 | 0.9869 / 0.9824 / 0.9892 | 0.9873 / 0.9825 / 0.9894 | 20 / 8 / 21 | 25 / 13 / 25 | early_stopping / early_stopping / epochs_completed | 4060 / 2245 / 4327 |
-| efficientnet_b0_imagenet_224 | 0.9871 ± 0.0027 | 0.9873 ± 0.0026 | 0.9840 / 0.9892 / 0.9880 | 0.9844 / 0.9892 / 0.9882 | 5 / 12 / 10 | 10 / 17 / 15 | early_stopping / early_stopping / early_stopping | 3056 / 4988 / 4394 |
-
-Train time is indicative only: it depends on the session and on the laptop's thermal state.
-
-Runs that reached the 25-epoch cap (stopped_reason `epochs_completed`) instead of early stopping — a finding, not acted on: resnet18_scratch_64 seed 2 (exp-20261027-202749-e42275; best epoch 25); small_cnn_scratch_64 seed 0 (exp-20261027-204957-d42310; best epoch 25); small_cnn_scratch_64 seed 1 (exp-20261027-211106-cc7c83; best epoch 25); small_cnn_scratch_64 seed 2 (exp-20261027-213240-d42c79; best epoch 23); resnet18_imagenet_224 seed 2 (exp-20261027-233452-43080e; best epoch 21).
-
-Per-class VAL recall, seed 0 of each model — VALIDATION (selection-biased) — not test results. Classes marked † are largely low-information (near-duplicates among them cannot be assessed by hashing; DATASETS.md).
-
-| class | majority_baseline | resnet18_scratch_64 | small_cnn_scratch_64 | resnet18_imagenet_224 | efficientnet_b0_imagenet_224 |
+| image | true | resnet18_scratch_64 | small_cnn_scratch_64 | resnet18_imagenet_224 | efficientnet_b0_imagenet_224 |
 |---|---|---|---|---|---|
-| AnnualCrop | 0.0000 | 0.8889 | 0.9356 | 0.9778 | 0.9822 |
-| Forest † (34 % low-information) | 1.0000 | 0.9822 | 0.9911 | 0.9956 | 0.9911 |
-| HerbaceousVegetation | 0.0000 | 0.9222 | 0.9444 | 0.9933 | 0.9911 |
-| Highway | 0.0000 | 0.9360 | 0.9547 | 0.9893 | 0.9813 |
-| Industrial | 0.0000 | 0.9520 | 0.9413 | 0.9920 | 1.0000 |
-| Pasture | 0.0000 | 0.9067 | 0.9233 | 0.9700 | 0.9733 |
-| PermanentCrop | 0.0000 | 0.8773 | 0.9707 | 0.9733 | 0.9573 |
-| Residential | 0.0000 | 0.9933 | 1.0000 | 0.9933 | 0.9889 |
-| River | 0.0000 | 0.8853 | 0.9467 | 0.9840 | 0.9813 |
-| SeaLake † (78 % low-information) | 0.0000 | 0.9556 | 0.9800 | 1.0000 | 0.9933 |
+| AnnualCrop/AnnualCrop_264.jpg | AnnualCrop | AnnualCrop (0.997) | AnnualCrop (0.989) | AnnualCrop (1.000) | AnnualCrop (1.000) |
+| AnnualCrop/AnnualCrop_545.jpg | AnnualCrop | Pasture (0.956) ✗ | AnnualCrop (0.606) | AnnualCrop (0.985) | Pasture (0.974) ✗ |
+| Forest/Forest_185.jpg | Forest | Forest (0.995) | Forest (0.998) | Forest (1.000) | Forest (0.999) |
+| Forest/Forest_1946.jpg | Forest | Forest (0.995) | Forest (0.997) [CAM all zero] | Forest (0.999) | Forest (0.985) |
+| HerbaceousVegetation/HerbaceousVegetation_104.jpg | HerbaceousVegetation | HerbaceousVegetation (0.630) | HerbaceousVegetation (0.981) | HerbaceousVegetation (1.000) | HerbaceousVegetation (0.998) |
+| HerbaceousVegetation/HerbaceousVegetation_1212.jpg | HerbaceousVegetation | HerbaceousVegetation (0.519) | HerbaceousVegetation (0.889) | HerbaceousVegetation (1.000) | HerbaceousVegetation (1.000) |
+| Highway/Highway_250.jpg | Highway | Highway (0.999) | Highway (0.999) | Highway (1.000) | Highway (1.000) |
+| Highway/Highway_650.jpg | Highway | Highway (0.824) | River (0.569) ✗ | Highway (0.999) | Highway (0.997) |
+| Industrial/Industrial_2157.jpg | Industrial | Industrial (0.998) | Industrial (0.963) | Industrial (1.000) | Industrial (1.000) |
+| Industrial/Industrial_2386.jpg | Industrial | Industrial (0.976) | Industrial (0.967) | Industrial (1.000) | Industrial (1.000) |
+| Pasture/Pasture_365.jpg | Pasture | Pasture (0.658) | Pasture (0.859) | Pasture (1.000) | Pasture (0.997) |
+| Pasture/Pasture_536.jpg | Pasture | Pasture (0.998) | Pasture (1.000) | Pasture (1.000) | Pasture (1.000) |
+| PermanentCrop/PermanentCrop_2265.jpg | PermanentCrop | PermanentCrop (0.982) | PermanentCrop (0.980) | PermanentCrop (1.000) | PermanentCrop (0.999) |
+| PermanentCrop/PermanentCrop_870.jpg | PermanentCrop | PermanentCrop (0.585) | PermanentCrop (1.000) | PermanentCrop (1.000) | PermanentCrop (0.991) |
+| Residential/Residential_2845.jpg | Residential | Residential (1.000) | Residential (1.000) | Residential (1.000) | Residential (1.000) |
+| Residential/Residential_58.jpg | Residential | Residential (1.000) | Residential (1.000) | Residential (1.000) | Residential (1.000) |
+| River/River_192.jpg | River | River (0.999) | River (1.000) | River (1.000) | River (1.000) |
+| River/River_699.jpg | River | PermanentCrop (0.756) ✗ | PermanentCrop (0.699) ✗ | River (0.917) | River (0.999) |
+| SeaLake/SeaLake_11.jpg | SeaLake | Forest (0.625) ✗ | SeaLake (0.705) | SeaLake (1.000) | SeaLake (0.999) |
+| SeaLake/SeaLake_39.jpg | SeaLake | SeaLake (0.960) | SeaLake (0.979) | SeaLake (1.000) | SeaLake (0.999) |
 
-Runs (experiment id / val evaluation id):
+- **Wrong and confident:** two wrong predictions came with probabilities of 0.956 and 0.974
+  (AnnualCrop_545 → Pasture). Confidence is not correctness.
+- **All-zero CAM:** small_cnn's CAM for Forest_1946 is all zero (no positive evidence at the
+  target layer), although the prediction has probability 0.997. The response warns and the
+  overlay highlights nothing.
+- **Low-information classes:** SeaLake and Forest are largely low-information
+  (DATASETS.md).
 
-- majority_baseline seed 0: exp-20261027-201053-5f2809 / ev-20261028-041748-ef337a
-- majority_baseline seed 1: exp-20261027-201101-632b02 / ev-20261028-041804-166ee7
-- majority_baseline seed 2: exp-20261027-201108-703436 / ev-20261028-041820-d87583
-- resnet18_scratch_64 seed 0: exp-20261027-201115-e384ed / ev-20261028-042026-b5cb93
-- resnet18_scratch_64 seed 1: exp-20261027-202124-e89a98 / ev-20261028-042048-83be42
-- resnet18_scratch_64 seed 2: exp-20261027-202749-e42275 / ev-20261028-042111-ebe183
-- small_cnn_scratch_64 seed 0: exp-20261027-204957-d42310 / ev-20261028-042134-cf3fb5
-- small_cnn_scratch_64 seed 1: exp-20261027-211106-cc7c83 / ev-20261028-042156-27fe9e
-- small_cnn_scratch_64 seed 2: exp-20261027-213240-d42c79 / ev-20261028-042217-2ae5cf
-- resnet18_imagenet_224 seed 0: exp-20261027-214915-e0d372 / ev-20261028-041854-e1bd88
-- resnet18_imagenet_224 seed 1: exp-20261027-225711-6db256 / ev-20261028-041929-b260a5
-- resnet18_imagenet_224 seed 2: exp-20261027-233452-43080e / ev-20261028-042003-26e664
-- efficientnet_b0_imagenet_224 seed 0: exp-20261028-004715-3da317 / ev-20261028-041610-12527c
-- efficientnet_b0_imagenet_224 seed 1: exp-20261028-013827-6cbab1 / ev-20261028-041651-df21cd
-- efficientnet_b0_imagenet_224 seed 2: exp-20261028-030154-fe104a / ev-20261028-041731-f7b236
+### 5.3 Timing on CPU (run 3; indicative; one laptop)
 
-## 7. Latency, seed 0 (`results/latency_seed0.md`)
+`model load` = `timing_ms.model_load` of the first request. That covers the verified loading
+path: dataset fast verify of 27,000 files, manifest, checkpoint hash, weights. `total` covers
+the whole service call; `forward` / `CAM` cover the model work only. Warm figures are medians of
+19 requests.
 
-- Forward pass only, on random input: 10 warm-up and 50 timed iterations.
-- Measured on its own, with no split and no images read, so it is neither a validation nor a test number.
+| model | cold: model load ms | cold: predict total ms | cold: gradcam total ms | warm: predict total ms (forward) | warm: gradcam total ms (CAM only) |
+|---|---|---|---|---|---|
+| resnet18_scratch_64 | 6712 | 7140 | 288 | 127.4 (35.8) | 182.9 (25.9) |
+| small_cnn_scratch_64 | 6700 | 6756 | 75 | 27.5 (4.5) | 78.6 (6.3) |
+| resnet18_imagenet_224 | 6089 | 6271 | 256 | 146.2 (57.6) | 252.2 (62.1) |
+| efficientnet_b0_imagenet_224 | 7079 | 7240 | 259 | 114.1 (64.8) | 240.5 (85.3) |
 
-| model | device | device name | bs1 median ms | bs1 p95 ms | bs32 median ms | bs32 ms/image | latency id |
-|---|---|---|---|---|---|---|---|
-| resnet18_scratch_64 | cpu | Intel64 Family 6 Model 186 Stepping 2, GenuineIntel | 14.000 | 18.742 | 111.436 | 3.482 | lat-20261028-042615-15f43a |
-| resnet18_scratch_64 | cuda | NVIDIA GeForce RTX 3050 6GB Laptop GPU | 4.288 | 4.645 | 4.930 | 0.154 | lat-20261028-042627-c1d08e |
-| small_cnn_scratch_64 | cpu | Intel64 Family 6 Model 186 Stepping 2, GenuineIntel | 4.745 | 5.957 | 58.508 | 1.828 | lat-20261028-042641-8a733a |
-| small_cnn_scratch_64 | cuda | NVIDIA GeForce RTX 3050 6GB Laptop GPU | 1.730 | 1.868 | 3.018 | 0.094 | lat-20261028-042653-f82a13 |
-| resnet18_imagenet_224 | cpu | Intel64 Family 6 Model 186 Stepping 2, GenuineIntel | 52.563 | 55.270 | 913.155 | 28.536 | lat-20261028-042542-f0cc3e |
-| resnet18_imagenet_224 | cuda | NVIDIA GeForce RTX 3050 6GB Laptop GPU | 4.061 | 4.735 | 37.113 | 1.160 | lat-20261028-042557-9554bb |
-| efficientnet_b0_imagenet_224 | cpu | Intel64 Family 6 Model 186 Stepping 2, GenuineIntel | 66.395 | 73.569 | 1552.687 | 48.521 | lat-20261028-042417-fae778 |
-| efficientnet_b0_imagenet_224 | cuda | NVIDIA GeForce RTX 3050 6GB Laptop GPU | 13.526 | 18.960 | 56.039 | 1.751 | lat-20261028-042433-5fcdbd |
+- **Re-hash cost:** the gap between warm total and forward is mostly the per-request checkpoint
+  re-hash (45 MB for resnet18, 1.6 MB for small_cnn) plus the DB lookups.
+- **Run-to-run variation:** times varied between demo runs; for example, warm predict for
+  resnet18_imagenet_224 was 118.6 ms in run 1 and 146.2 ms in run 3.
+- **CUDA, checked once outside the demo:** `inference_device=cuda` on resnet18_imagenet_224 and
+  Highway_250 gave the same prediction as CPU, with probabilities within 6.7e-7 and normalised
+  CAM values within 1.1e-4. Warm forward took 5.2 ms on CUDA against 52.6 ms on CPU.
 
-## 8. No-test-evaluation check
+### 5.4 Out-of-distribution upload
+
+- **Input:** a generated 300x200 PNG with gradients, a yellow disk and a blue rectangle, not
+  EuroSAT, sent to resnet18_imagenet_224.
+- **Prediction:** **SeaLake, probability 0.995**.
+- **Warnings:** `input differs from training data (64x64 images of dataset 'eurosat-rgb');
+  prediction may be unreliable (out-of-distribution)`, plus the note that only the size is
+  compared.
+- **Unseen fraction:** 0.4896 (300x200 → 384x256 → crop 224). The overlay is
+  `var/demos/m5/overlays/ood_upload_resnet18_imagenet_224.png`.
+
+### 5.5 TEST image request (curl.exe, with the client header)
 
 ```
-$ python scripts/run_benchmark.py check benchmarks/eurosat-v1
-benchmark experiments: 15; pilot experiments: 12
-val evaluations of benchmark experiments: 15
-test evaluations of benchmark or pilot experiments: 0
-test evaluations in the whole database: 0
-OK: no test evaluation exists for any benchmark or pilot experiment
+> curl.exe -s -i -X POST http://127.0.0.1:8000/api/experiments/exp-20261027-214915-e0d372/predict -H "X-VisionBench-Request: 1" -H "Content-Type: application/json" -d '{"dataset_id":"ds-61112928e412","relpath":"AnnualCrop/AnnualCrop_100.jpg"}'
+HTTP/1.1 403 Forbidden
+date: Thu, 29 Oct 2026 04:21:49 GMT
+server: uvicorn
+content-length: 192
+content-type: application/json
+vary: Origin
+x-content-type-options: nosniff
+
+{"error":{"code":"test_split_locked","message":"this image is in the TEST split of sp-55320e11726c; test images are locked until the final test evaluation (VISIONBENCH_TEST_IMAGES_UNLOCKED)"}}
 ```
 
-A direct SQLite query on `var/db/visionbench.db` gives:
-- evaluations by split: `[('val', 15)]`;
-- experiments: `[('completed', 27)]` (15 benchmark + 12 pilot);
-- latency measurements: 8.
+- **Which image:** the alphabetically first test relpath. The same request to `/gradcam` was
+  also 403 (run 1). Without the client header the request was `403 missing_client_header`.
+- **README commands:** the curl lines in the README (a val image, an upload, an upload with
+  `target_class`, the TEST request) were run as written in PowerShell 5.1 against a live server.
 
-## 9. Lint and tests (after the last code change)
+### 5.6 Overlay files (under `var/`, not committed; 81 PNGs)
+
+Every dataset overlay has a footer with the EuroSAT/Copernicus attribution (DATASETS.md) and
+"VALIDATION images - demo, not results".
+
+- `var/demos/m5/overlays/<model>/<Class>__<Class>_<n>.png` for each of the 4 models
+  (`resnet18_scratch_64`, `small_cnn_scratch_64`, `resnet18_imagenet_224`,
+  `efficientnet_b0_imagenet_224`) and each of the 20 images:
+  - AnnualCrop__AnnualCrop_264, AnnualCrop__AnnualCrop_545
+  - Forest__Forest_185, Forest__Forest_1946
+  - HerbaceousVegetation__HerbaceousVegetation_104, HerbaceousVegetation__HerbaceousVegetation_1212
+  - Highway__Highway_250, Highway__Highway_650
+  - Industrial__Industrial_2157, Industrial__Industrial_2386
+  - Pasture__Pasture_365, Pasture__Pasture_536
+  - PermanentCrop__PermanentCrop_2265, PermanentCrop__PermanentCrop_870
+  - Residential__Residential_2845, Residential__Residential_58
+  - River__River_192, River__River_699
+  - SeaLake__SeaLake_11, SeaLake__SeaLake_39
+- `var/demos/m5/overlays/ood_upload_resnet18_imagenet_224.png`
+
+**Suggested for supervisor review.** Each one shows one property; none was chosen for looking
+good:
+
+1. `var/demos/m5/overlays/resnet18_imagenet_224/Highway__Highway_250.png`: the hatched,
+   unseen 4 px border (23.4 %).
+2. `var/demos/m5/overlays/small_cnn_scratch_64/Highway__Highway_250.png`: the same image with a
+   64 px scratch model (nothing unseen, 8x8 CAM).
+3. `var/demos/m5/overlays/resnet18_scratch_64/Highway__Highway_250.png`: the same image with a
+   **2x2** CAM, too coarse to follow the road.
+4. `var/demos/m5/overlays/small_cnn_scratch_64/Forest__Forest_1946.png`: an all-zero CAM,
+   reported rather than rescaled.
+5. `var/demos/m5/overlays/efficientnet_b0_imagenet_224/AnnualCrop__AnnualCrop_545.png`: a
+   confident wrong prediction (Pasture, 0.974) with a focused-looking CAM.
+6. `var/demos/m5/overlays/ood_upload_resnet18_imagenet_224.png`: the out-of-distribution
+   upload (SeaLake 0.995; 49 % unseen).
+
+## 6. Lint and full test suite (after the last code change)
 
 ```
 $ ruff check . ; ruff format --check .
 All checks passed!
-106 files already formatted
+118 files already formatted
 
-$ pytest -q -rs
+$ pytest -q -rs -p no:cacheprovider --cov=visionbench
+[measured] GET /api/health while training: n=31, max=19.0 ms
+[measured] GET /api/health during a 1.5 s predict: 13.6 ms (thread pool); control with the model run on the event loop: 1321.1 ms
 torch 2.14.1+cu130; torch.cuda.is_available()=True; CUDA_VISIBLE_DEVICES=None
 SKIPPED [1] tests\data\test_scan.py:34: cannot create file symlinks here (Windows without symlink privilege / Developer Mode); directory links are covered via an NTFS junction
-285 passed, 1 skipped, 1 warning in 386.02s (0:06:26)
+316 passed, 1 skipped, 1 warning in 630.53s (0:10:30)
+TOTAL 94 % (inference/service.py 96 %, explain/gradcam.py 94 %, explain/geometry.py 97 %, explain/overlay.py 91 %, api/routes/inference.py 97 %)
 
-$ CUDA_VISIBLE_DEVICES=-1 pytest -q -rs
+$ CUDA_VISIBLE_DEVICES=-1 pytest -q -rs -p no:cacheprovider
+[measured] GET /api/health while training: n=32, max=13.5 ms
+[measured] GET /api/health during a 1.5 s predict: 8.6 ms (thread pool); control with the model run on the event loop: 1279.6 ms
 torch 2.14.1+cu130; torch.cuda.is_available()=False; CUDA_VISIBLE_DEVICES='-1'
 SKIPPED [1] tests\data\test_scan.py:34: cannot create file symlinks here (Windows without symlink privilege / Developer Mode); directory links are covered via an NTFS junction
-285 passed, 1 skipped, 1 warning in 215.66s (0:03:35)
+316 passed, 1 skipped, 1 warning in 495.29s (0:08:15)
 ```
 
-- The driver scripts are not covered by the test suite. Their behaviour is shown by the real runs above.
-- The interruption logic was exercised during B1 on a temporary copy of the protocol folder, before the runs started.
+After this run only docs and this packet changed. The no-test check still holds:
+`run_benchmark.py check` reports 0 test evaluations for the benchmark, pilot and repro-check
+experiments and 0 in the whole database.
 
-## 10. Rules followed, and what was not done
+## 7. Limitations and what was not done
 
-- **No test evaluation of any kind.** Test is evaluated once, at M8, for all seeds of all models (protocol §6).
-- **No changes after seeing validation results:** no hyperparameter, batch size, epoch, `num_workers` or AMP change, and no amendment. The epoch-cap finding is reported only.
-- **No cherry-picking:** every seed is reported. The comparison uses seed 0, fixed by the protocol's UI/demo rule before any run.
-- **Training times are indicative.** They depend on the session and on the laptop's thermal state (§4.2).
-- **Confounds remain as listed in protocol §7.**
-  - Pretraining and resolution are joint. Comparing the control resnet18_scratch_64 with resnet18_imagenet_224 shows their combined effect only.
-  - Learning rates differ between scratch and pretrained models and were not tuned.
-  - n = 3 seeds; one fixed split.
-  - SeaLake and Forest are largely low-information (78 % and 34 %), and their near-duplicates cannot be assessed by hashing.
-- **Not committed:** `var/` (dataset, DB, checkpoints, logs, reports). The committed `results/*.md` files are text copies of the reports in `var/`.
+- **Coarse CAMs:** 2x2 for resnet18_scratch_64, 7x7 at 224 px and 8x8 for small_cnn. Grad-CAM is
+  not causal and does not show correctness (the fixed text is in every response).
+- **Synthetic sanity checks only:** the sanity checks use a synthetic task and SmallCNN. They do
+  not show that the EuroSAT CAMs are faithful.
+- **Test-lock gap:** the lock misses re-encoded, resized or edited copies of test images.
+- **Concurrency:** more than one concurrent slot under real load was not tested, only the busy
+  path and the per-model locks.
+- **CUDA inference:** checked once by hand, not in the test suite.
+- **Warm request cost:** the per-request checkpoint re-hash dominates warm request time for the
+  larger models. That is the price of never serving a changed checkpoint.
+- **Overlays not stored:** overlays are returned in the response and saved only by the demo
+  script under `var/`. They are not stored as experiment artifacts; the task's design replaces
+  the plan's "overlays as artifacts".
+- **No frontend, no protocol change, no push.**

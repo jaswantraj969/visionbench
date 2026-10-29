@@ -266,6 +266,14 @@ Limits:
 - **Validation comparisons are selection-biased.** A comparison on `--split val` states that
   the same validation data chose each model's checkpoint, so val metrics overestimate
   performance on new data (`selection_bias_note` in JSON, a note in Markdown).
+- **Test images are locked for inference (since M5).** `predict` and `gradcam` refuse any image
+  of the experiment's TEST split, by relpath or by identical bytes (sha256, which also catches
+  an upload of the same file), with `403 test_split_locked`. The lock is lifted only by
+  `VISIONBENCH_TEST_IMAGES_UNLOCKED=true`, which is set at M8 after the final test evaluation and
+  never before. Why: looking at test images and their predictions one by one is informal use of
+  the test set (it invites picking models, seeds or examples on test), which this section
+  forbids until the single final evaluation. Limitation: a re-encoded, resized or edited copy of
+  a test image is not recognised. Demos and checks use VAL images only.
 
 ## 7. Preprocessing (implemented, M2)
 - **Pretrained weights:** use the weights' own transform. ResNet18: resize 256 (bilinear), then
@@ -433,3 +441,46 @@ model performance.
 - Bootstrap CIs on small evaluation sets are coarse; with 54 test images a single error moves
   accuracy by ~0.019. Perfect predictions give a degenerate CI [1, 1], which does not mean the
   true error rate is zero.
+
+## 13. Grad-CAM explanations: limitations and sanity checks (implemented, M5)
+
+Every Grad-CAM response carries this fixed text:
+
+> Grad-CAM shows which regions of the final convolutional feature map most increased the score
+> of the target class. It is coarse (feature-map resolution stated above), is not a causal
+> explanation, and does not show that the prediction is correct.
+
+Rules:
+- Grad-CAM is never presented as evidence that a prediction is correct, nor as a causal
+  explanation. A highlighted region is where the target logit's gradient-weighted activations
+  are positive at the target layer, nothing more.
+- The feature-map resolution is always stated: 8x8 (small_cnn, 64 px), 7x7 (resnet18 /
+  efficientnet_b0, 224 px), and only **2x2 for resnet18 at 64 px**, which is too coarse to
+  localise anything within a tile.
+- The CAM is mapped onto the original image through the exact inverse of the val transform.
+  Regions the model never saw (the border removed by resize 256 + centre crop 224: 23.4 % of a
+  64x64 tile) are marked "not seen by the model" and reported as a fraction; the heatmap is
+  never drawn there.
+- A CAM without positive evidence is reported as all zeros with a warning; it is never rescaled
+  into a heatmap.
+- Demo images are VAL images chosen by a seeded rule, labelled "VALIDATION images - demo, not
+  results". Never test images (section 6); never hand-picked examples.
+- Shared overlays of EuroSAT images carry the dataset attribution (DATASETS.md).
+
+Sanity checks (`tests/explain/test_gradcam.py`; thresholds fixed before the checks were run):
+
+| Check | Setup | Threshold |
+|---|---|---|
+| Localization | SmallCNN trained on a synthetic task: the class is decided ONLY by a coloured disk in a random, known quadrant; a white square distractor sits in another quadrant | Grad-CAM peak in the disk's quadrant for >= 80 % of held-out images |
+| Target sensitivity | same model and images; CAM of the true class vs the CAMs of the other classes | mean Pearson r < 0.5 |
+| Model randomization (Adebayo et al., 2018) | trained model vs the same architecture with re-initialised weights | mean \|Spearman rho\| < 0.5 |
+| Reference implementation | backward hook + `.backward()` on a copy of the model | identical CAM (allclose) |
+| Geometry | real val transforms (64 px square resize; 256 resize + 224 centre crop; non-square originals) | markers land where the mapping predicts (< 1 px); a border marker is cropped and reported unseen; round trips exact |
+| Hooks | 100 successful + 100 failing calls | no hook left on any module; no `.grad` written |
+
+The first localization design made the class the disk's quadrant. The model reached 100 %
+accuracy, but the peak hit the quadrant for only 24/80 images (chance level), with Grad-CAM values
+identical to the backward-hook reference. SmallCNN ends in global average pooling, so it can only
+read position from padding effects at the borders; its evidence is not local. That design
+tested the architecture rather than the explanation and was replaced; the threshold was kept.
+Results are in REVIEW_PACKET.md.

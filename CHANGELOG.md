@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased: M5 prediction and Grad-CAM in the API process (2026-10-28/29)
+
+### Added
+- `POST /api/experiments/{id}/predict` and `/gradcam`: one image (multipart upload or a recorded
+  dataset image), served synchronously; request body read on the event loop, model work in the
+  thread pool.
+- `visionbench.inference.service.InferenceService`: verified loading through the evaluation path,
+  LRU cache keyed by (experiment, checkpoint sha256), `inference_device` (default cpu),
+  `inference_threads`, bounded concurrency (`429 inference_busy`), TEST-image lock
+  (`403 test_split_locked`; `VISIONBENCH_TEST_IMAGES_UNLOCKED`), out-of-distribution warning.
+- `visionbench.explain`: `gradcam` (target logit, `autograd.grad`, hook removed in `finally`,
+  all-zero reported), `geometry` (exact inverse of the val transform, unseen fraction), `overlay`
+  (PNG with "not seen by the model" marking and legend).
+- Settings: `inference_device`, `inference_threads`, `inference_cache_size`,
+  `inference_max_concurrent`, `inference_wait_seconds`, `inference_max_upload_mb`,
+  `test_images_unlocked`.
+- `api.upload.receive_image_upload` (in-memory multipart, byte limit).
+- Grad-CAM sanity tests (localization, target sensitivity, model randomization, reference
+  implementation, geometry, hook hygiene) and API tests (test lock, uploads, limits, busy, cache,
+  tampered checkpoint, event loop).
+- `scripts/demo_inference.py` (seeded VAL demo through a live server).
+- Step 0: `experiments.stopped_reason` (schema v6) with `scripts/backfill_stopped_reason.py`;
+  `scripts/repro_check.py` and `benchmarks/eurosat-v1/repro_check.json`.
+
+### Changed
+- `decode_image(max_pixels=...)` checks the header size before decoding.
+- The image endpoint's record lookup moved to `data.store.recorded_image` (shared with inference).
+
 ## Unreleased: B1 eurosat-v1 benchmark, validation only (2026-10-28)
 
 ### Added

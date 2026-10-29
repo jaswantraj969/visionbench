@@ -11,7 +11,8 @@
 
 All ML and data logic lives in the importable `visionbench` package. The API, CLI, and job
 runner are thin layers: they parse input, call library functions, and serialize output. They
-contain no ML logic.
+contain no ML logic. Single-image prediction and Grad-CAM (M5) are the only model work that runs
+inside the API process (through `visionbench.inference`, see "Inference and Grad-CAM").
 
 ## Package map
 
@@ -62,7 +63,11 @@ contain no ML logic.
 | `evaluation.efficiency` | implemented (M3) | params, checkpoint size, forward-pass latency |
 | `evaluation.evaluate` | implemented (M3) | `evaluate_experiment`: predictions, metrics, outputs, test-use accounting |
 | `evaluation.compare` | implemented (M3) | comparison report, VAL-only ranking, confound flags |
-| `explain` | empty | M5: Grad-CAM |
+| `explain.gradcam` | implemented (M5) | Grad-CAM on the registry target layer (target logit, autograd.grad, hook removed in `finally`, all-zero reported) |
+| `explain.geometry` | implemented (M5) | `ValGeometry`: the recorded val transform's mapping and its exact inverse; unseen fraction |
+| `explain.overlay` | implemented (M5) | overlay PNG on the original image with "not seen by the model" marking and a legend |
+| `inference.service` | implemented (M5) | `InferenceService`: verified loading, LRU model cache, concurrency slots, inputs, test lock, predict / gradcam |
+| `api.routes.inference` | implemented (M5) | `POST /api/experiments/{id}/predict` and `/gradcam` (body read on the loop, model work in the thread pool) |
 | `robustness` | empty | M6: corruption benchmarks |
 
 ## Data root layout
@@ -267,6 +272,82 @@ its recorded sha256, requires identical samples and labels, takes latency from t
 measurement on the chosen device, and writes `reports/<report_id>/comparison.{json,md}`.
 Comparisons on val state the selection-bias note.
 
+## Inference and Grad-CAM (M5)
+
+`POST /api/experiments/{id}/predict` and `POST /api/experiments/{id}/gradcam` serve one image
+synchronously from the API process. A worker job is not used for this: starting a job process
+takes 10-15 s (torch import), which is unusable interactively.
+
+**Loading (verified path only).** `InferenceService.get_model` loads a model through
+`evaluation.data.open_for_evaluation` + `load_for_evaluation`: the experiment must be completed;
+the dataset passes a fast verify and its fingerprint matches; the split manifest is the one
+recorded at training; the checkpoint's sha256 equals its artifact row; `torch.load` runs with
+`weights_only=True` on a file inside `<data_root>/experiments/`; the rebuilt val transform must
+equal the recorded one. Nothing else is ever loaded.
+
+**Model cache.** An LRU `OrderedDict` of `inference_cache_size` entries (default 2), keyed by
+(experiment id, checkpoint sha256). Every request re-hashes the checkpoint file and checks its
+artifact row first, so a changed file is never served from the cache (it fails with the
+evaluation path's sha256 error). The re-hash dominates the warm request time of the larger
+models (about 45 MB for resnet18).
+
+**Device and threads.** `VISIONBENCH_INFERENCE_DEVICE` = `cpu` (default) | `cuda` | `auto`. CPU
+is the default so that interactive requests never compete with a training job for the 6 GB
+GPU. `VISIONBENCH_INFERENCE_THREADS` sets torch's intra-op threads for the whole API process.
+
+**Concurrency.** A `BoundedSemaphore(inference_max_concurrent)` (default 1) guards every
+request; a request that gets no slot within `inference_wait_seconds` (default 2 s) fails with
+`429 inference_busy`. Each cached model also has its own lock, because Grad-CAM registers a hook
+on it. The route reads the request body on the event loop (bounded) and runs all model work
+with `run_in_threadpool`, so the event loop is never blocked. A test measures `GET /api/health`
+during a slow prediction and, as a control, shows that running the model on the loop does block
+it.
+
+**Inputs.** Either a multipart upload (`file`; at most `inference_max_upload_mb`, default 10 MB;
+JPEG/PNG/BMP/WEBP; parsed in memory, never written to disk; decoded by the shared decoder with
+EXIF orientation and the `max_image_pixels` limit checked on the header before decoding), or a
+JSON body `{dataset_id, relpath}` naming a recorded dataset image (lookup-only, the same
+`data.store.recorded_image` as the image endpoint). Errors: `413 upload_too_large` /
+`image_too_large`, `415 unsupported_image` / `unsupported_media_type`, `422 missing_file`,
+`404 image_not_found`.
+
+**Test lock.** If the image is in the TEST split of the experiment's manifest (by relpath), or
+its bytes are identical (sha256) to a test image (which also covers uploads and other datasets
+holding the same file), the request fails with `403 test_split_locked` unless
+`VISIONBENCH_TEST_IMAGES_UNLOCKED=true` (default false; to be set only at M8, after the final
+test evaluation). Reason: looking at test images one by one before M8 is informal test-set use,
+which the protocol forbids (EXPERIMENT_PROTOCOL.md section 6). Re-encoded or edited copies of a
+test image are not detected. Val and train images are allowed and labelled in `notes`; an image
+whose size differs from the training images gets an out-of-distribution warning.
+
+**Grad-CAM** (`explain.gradcam`). A forward hook on the registry's target layer (`small_cnn`
+`features.block4.conv`, `resnet18` `layer4`, `efficientnet_b0` `features.8`) captures the
+activation A. The gradient of the target logit (pre-softmax) with respect to A is computed with
+`torch.autograd.grad`: the same gradient a backward hook sees, without writing `.grad` into the
+shared cached model (a test checks equality with a backward-hook implementation). Channel
+weights are the spatial mean of the gradients; CAM = ReLU(sum_k w_k A_k). The model is in eval
+mode, gradients are enabled only inside the call, and the hook is removed in `finally`. A CAM
+with no positive evidence is returned as zeros with `all_zero: true` and a warning, never
+rescaled. The feature-map resolution depends on the input size: 8x8 for small_cnn at 64 px,
+7x7 for resnet18 / efficientnet_b0 at 224 px, and only **2x2 for resnet18 at 64 px**.
+
+**Geometry** (`explain.geometry.ValGeometry`). The CAM lives in model-input space. It is mapped
+onto the ORIGINAL image through the exact inverse of the recorded val transform: for
+`Resize((s, s))` a per-axis scale; for `Resize(r)` + `CenterCrop(s)` the resized size and crop
+offset computed with torchvision's own arithmetic (`int(r * long / short)`,
+`int(round((size - s) / 2))`), in continuous pixel-edge coordinates (`align_corners=False`).
+Each display pixel centre is mapped to input coordinates and the CAM sampled bilinearly. Pixels
+outside the input, i.e. the border removed by the centre crop (23.4 % of a 64x64 EuroSAT tile),
+are "not seen by the model": the overlay greys and hatches them, outlines the seen region and
+states the unseen fraction in the legend, and the response reports `seen_box_in_original` and
+`unseen_fraction`. Tests check the mapping against the real transforms (marker positions,
+cropped border markers, round trips).
+
+**Response** (gradcam): target and predicted class with probabilities, `cam.feature_map_size`
+and `resolution`, the normalised low-resolution CAM values, `geometry`, the overlay PNG as a
+base64 data URI, timings, warnings, notes, and the fixed `limitations` text. Shared overlays of
+dataset images need the dataset's attribution (DATASETS.md).
+
 ## Error schema
 
 Every API error response: `{"error": {"code": "<machine code>", "message": "<human text>"}}`.
@@ -277,11 +358,12 @@ Unhandled exceptions return `500 internal_error` without leaking exception detai
 `create_app(settings)` builds the app; `visionbench serve` runs it with uvicorn on
 `127.0.0.1` (non-loopback hosts are refused: there is **no authentication**).
 
-- **No ML work in a request.** Every endpoint that imports, splits, verifies, trains,
-  evaluates or measures latency validates its input, runs cheap pre-checks (dataset/split/
-  experiment exists, experiment completed, test-reuse rule, baseline-has-no-latency), and
-  enqueues a job: `202 {"job": {...}}`. The only synchronous computation is
-  `POST /api/comparisons`, which reads recorded predictions (no model is loaded).
+- **No ML work in a request, except bounded single-image inference.** Every endpoint that
+  imports, splits, verifies, trains, evaluates or measures latency validates its input, runs
+  cheap pre-checks (dataset/split/experiment exists, experiment completed, test-reuse rule,
+  baseline-has-no-latency), and enqueues a job: `202 {"job": {...}}`. Synchronous
+  computation: `POST /api/comparisons` (reads recorded predictions; no model is loaded) and,
+  since M5, `predict` / `gradcam` for one image (see "Inference and Grad-CAM").
 - **Ids** are validated with strict patterns (`ds-[0-9a-f]{12}`, `sp-...`, `exp-YYYYMMDD-
   HHMMSS-[0-9a-f]{6}`, `ev-`, `rp-`, `job-`); a mismatch is `422 validation_error` before
   any filesystem access.

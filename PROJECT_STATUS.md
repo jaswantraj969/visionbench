@@ -1,6 +1,6 @@
 # Project Status
 
-_Last updated: 2026-10-28, end of B1 (eurosat-v1 protocol frozen; 15 runs trained and evaluated on VAL only; pending supervisor review)._
+_Last updated: 2026-10-29, end of M5 (prediction and Grad-CAM served from the API process; pending supervisor review)._
 
 ## Current state
 - **M0:** foundation (config, seeding, env info, health/ready API).
@@ -69,9 +69,37 @@ _Last updated: 2026-10-28, end of B1 (eurosat-v1 protocol frozen; 15 runs traine
     summary in `benchmarks/eurosat-v1/results/`. All numbers there are VALIDATION
     (selection-biased), not test results;
   - **0 test evaluations exist in the whole database.** Test is evaluated once, at M8.
-- There is no authentication, Grad-CAM, robustness suite, or frontend.
+- **M5 step 0** (B1 follow-ups): `experiments.stopped_reason` (schema v6), backfilled for the
+  27 existing experiments from their own `train.log`; full-length repro check of
+  resnet18_scratch_64 seed 1 (`repro_check.json`): history (10 epochs), `best.pt` and `last.pt`
+  bitwise identical to the benchmark run.
+- **M5** (prediction and Grad-CAM, no frontend):
+  - `POST /api/experiments/{id}/predict` and `/gradcam`, synchronous in the API process; body
+    read on the event loop, model work in the thread pool;
+  - `inference.service`: verified loading only (evaluation path), LRU cache keyed by
+    (experiment, checkpoint sha256) and re-hashed per request, CPU by default, bounded
+    concurrency (429), in-memory uploads through the shared decoder, TEST-image lock (403;
+    relpath or identical bytes), out-of-distribution warning;
+  - `explain`: Grad-CAM (target logit, autograd.grad, hook removed in `finally`, all-zero
+    reported), exact val-transform geometry with "not seen by the model" marking, overlay PNG;
+  - sanity checks: localization 75/75, target sensitivity mean r -0.606, model randomization
+    mean |rho| 0.129, equality with a backward-hook reference, geometry against real
+    transforms, no hook leaks.
+- There is no authentication, robustness suite, or frontend.
 
 ## Verified in session (2026-10-27, Windows 11, Python 3.11.15, torch 2.14.1+cu130, RTX 3050 6GB)
+- M5 (2026-10-29, after the last code change): `ruff check .` / `ruff format --check .` pass;
+  `pytest -q --cov=visionbench`: 316 passed and 1 skipped in 630.53 s, coverage 94 %
+  (`inference/service.py` 96 %, `explain/gradcam.py` 94 %, `explain/geometry.py` 97 %,
+  `explain/overlay.py` 91 %, `api/routes/inference.py` 97 %); with `CUDA_VISIBLE_DEVICES=-1`:
+  316 passed and 1 skipped in 495.29 s.
+- M5 demos on the real eurosat-v1 seed-0 models through `visionbench serve` (CPU inference;
+  VALIDATION images, demo, not results): 20 seeded VAL images x 4 models, predict + gradcam;
+  cold model load 6.1-7.1 s, warm predict 27.5-146.2 ms (median, total), warm gradcam
+  78.6-252.2 ms; one synthetic upload got the OOD warning; a TEST image request returned
+  `403 test_split_locked` (curl.exe). README curl lines were run in PowerShell 5.1.
+- `inference_device=cuda` checked once on resnet18_imagenet_224 (same prediction as CPU;
+  probabilities within 6.7e-7, normalised CAM within 1.1e-4).
 - B1 (2026-10-28, after the last code change): `ruff check .` / `ruff format --check .` pass;
   `pytest -q`: 285 passed and 1 skipped in 386.02 s; with `CUDA_VISIBLE_DEVICES=-1`: 285
   passed and 1 skipped in 215.66 s (no coverage run in B1).
@@ -109,6 +137,11 @@ _Last updated: 2026-10-28, end of B1 (eurosat-v1 protocol frozen; 15 runs traine
   small values).
 - Python 3.12/3.13.
 - Any TEST-split number for EuroSAT: none exists by design (M8).
+- Inference with `inference_max_concurrent` > 1 under real parallel load (only the busy path
+  and per-model locks are tested); CUDA inference in the API tests (they run on CPU).
+- The TEST-image lock does not recognise re-encoded, resized or edited copies of test images.
+- Grad-CAM sanity checks use a synthetic task and SmallCNN only; they do not establish that the
+  EuroSAT CAMs are faithful.
 - Training times are indicative (one shared laptop GPU; throughput changed during the
   session, see REVIEW_PACKET.md).
 - The audit does not search near-duplicates within val/test or between val and test by
@@ -116,8 +149,7 @@ _Last updated: 2026-10-28, end of B1 (eurosat-v1 protocol frozen; 15 runs traine
   low-information images, mostly SeaLake and Forest) cannot be checked by hashing.
 
 ## Blockers
-- None. B1 awaits supervisor review (REVIEW_PACKET.md).
+- None. M5 awaits supervisor review (REVIEW_PACKET.md).
 
 ## Next task
-M5: Grad-CAM for registry CNNs (overlays as artifacts, randomized-weights sanity check), run
-as worker jobs and exposed through the API.
+M6 (per IMPLEMENTATION_PLAN.md): robustness suite. A frontend is not started.
