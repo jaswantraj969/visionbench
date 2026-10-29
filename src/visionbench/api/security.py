@@ -15,7 +15,11 @@ Defences (pure ASGI, so upload bodies keep streaming):
   ``missing_client_header``. A browser only sends a custom header cross-origin after a CORS
   preflight, which a foreign origin fails, so a foreign page cannot produce such a request.
 - **Origin check**: if an unsafe request carries ``Origin``, it must be one of
-  ``Settings.cors_origins``; otherwise 403 ``origin_not_allowed`` (defence in depth).
+  ``Settings.cors_origins`` or the API's own origin (``http(s)://`` + the request's Host, which
+  has already passed the local-host check: the built frontend served by ``visionbench serve``
+  is same-origin, and browsers send ``Origin`` on same-origin POSTs too); otherwise 403
+  ``origin_not_allowed`` (defence in depth). A foreign page cannot forge ``Origin``, and a DNS
+  rebinding page fails the Host check first.
 - ``X-Content-Type-Options: nosniff`` on every response.
 
 GET requests need no header (they change nothing). Non-browser clients (curl, scripts) just
@@ -87,6 +91,12 @@ class LocalRequestGuard:
                     "state-changing requests need the header 'X-VisionBench-Request: 1'",
                 )
             origin = headers.get("origin")
-            if origin is not None and origin not in self.allowed_origins:
+            host = headers.get("host", "").strip().lower()
+            own = {f"http://{host}", f"https://{host}"}
+            if (
+                origin is not None
+                and origin not in self.allowed_origins
+                and origin.lower() not in own
+            ):
                 return 403, "origin_not_allowed", "request Origin is not an allowed CORS origin"
         return None

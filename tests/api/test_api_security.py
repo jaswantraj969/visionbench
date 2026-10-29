@@ -126,3 +126,20 @@ def test_host_of() -> None:
     assert host_of("[::1]:8000") == "[::1]" and host_of("[::1]") == "[::1]"
     assert host_of("LocalHost") == "localhost"
     assert host_of("::1") == "::1"  # unbracketed IPv6 is not a valid Host: never matches
+
+
+def test_same_origin_post_from_the_served_frontend_is_allowed(api) -> None:
+    """Browsers send Origin on same-origin POSTs; the API's own origin (its validated Host) is
+    accepted, so the frontend served by `visionbench serve` works. Found by the e2e test."""
+    for origin in ("http://127.0.0.1", "HTTP://127.0.0.1"):
+        r = api.post("/api/jobs/job-20000101-000000-abcdef/cancel", headers={"Origin": origin})
+        assert r.status_code == 404, (origin, r.text)  # passed the guard; the job does not exist
+    other_port = api.post(
+        "/api/jobs/job-20000101-000000-abcdef/cancel", headers={"Origin": "http://127.0.0.1:9999"}
+    )
+    assert other_port.status_code == 403 and _code(other_port) == "origin_not_allowed"
+    foreign = api.post(
+        "/api/jobs/job-20000101-000000-abcdef/cancel",
+        headers={"Origin": "http://evil.example", "Host": "evil.example"},
+    )
+    assert foreign.status_code == 400 and _code(foreign) == "invalid_host"
