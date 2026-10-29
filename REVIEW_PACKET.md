@@ -514,3 +514,147 @@ generated shapes, never EuroSAT:
 - Predict and Grad-CAM are not recorded, so no DB rows were added. Server and worker were
   stopped afterwards, and port 8000 was free.
 
+## Phase B — Release engineering (done; tag `v1.0.0-rc1`)
+
+Commits: `d411106` (Docker, compose, CI, demo-data, locks), `4c9f83f` (docs, version 1.0.0rc1,
+linux_tests.sh), `b1a6ef3` (Phase C preparation code), `3677583` (C1 plan), then the Gate B
+docs commit (tagged).
+
+**B1 Docker.**
+- Docker Desktop was installed per user but stopped. It was started as an app (no install, no
+  admin change), and the daemon came up: 29.7.2, linux/amd64.
+- `docker build` succeeded at d411106. It took about 14 min, mostly the torch download at about
+  245 kB/s. Image `visionbench:local` is 1.87 GB.
+- `docker compose up -d` gave:
+  - health `healthy` after start;
+  - `uid=10001(visionbench)`;
+  - port `127.0.0.1:8000->8000/tcp` only;
+  - `/api/health` 200; `/` and `/benchmark` 200 (SPA);
+  - `Host: evil.example` → 400 `invalid_host`; POST without the header → 403
+    `missing_client_header`.
+- Container torch is `2.14.1+cpu`, with CUDA unavailable.
+- A host script drove the API: demo ZIP upload → import 8.2 s → split 9.2 s → `small_cnn` 2-epoch
+  CPU training 44.0 s → VAL evaluation 9.2 s. VAL balanced accuracy was 0.444 on 18 synthetic
+  images: a pipeline sanity check, not a result.
+- After `compose down` / `up` the dataset and experiment were still in the volume. The volume was
+  then removed (`down -v`).
+- At 3677583 the image was rebuilt from cache (under 1 min). The Quick Start A commands, run in
+  PowerShell:
+  - `demo-data /data/demo` → 120 images;
+  - `dataset import /data/demo/shapes` → `ds-161c17e14fbf`, which the API lists;
+  - the plan hashes are OK inside the container.
+- In Git Bash the same commands failed, because Git Bash rewrote `/data/demo` into
+  `C:/Program Files/Git/data/demo`. This is documented under Troubleshooting (use
+  `MSYS_NO_PATHCONV=1` or PowerShell).
+
+**B2 Linux + CI.**
+- `scripts/linux_tests.sh` runs in `python:3.11-slim@sha256:6737…` as a non-root user, on a
+  `git archive` export.
+- Attempt 1 (export of d411106) never reached the tests. `pip install` failed with "THESE
+  PACKAGES DO NOT MATCH THE HASHES" for one wheel: a download did not match the index hash, on a
+  slow, shared link. It was treated as an infrastructure failure. The next run used a pip-cache
+  volume, and the export was refreshed to the newer HEAD.
+- At 3677583: `Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.41 python 3.11.18
+  torch 2.14.1+cpu`; ruff check and format pass; **360 passed, 1 warning** in 411.68 s. This
+  includes the file-symlink test that is skipped on Windows.
+- `.github/workflows/ci.yml` has backend, frontend, e2e and docker jobs, and keeps the previous
+  workflow's coverage step. **It has not run on GitHub Actions; there is no remote.**
+
+**B3.**
+- **`demo-data`:** deterministic pixels for a seed. PNG bytes differ by platform: the container
+  (zlib 1.3.1) and Windows (zlib 1.3.2) gave identical pixels but different bytes (2237 vs 2234
+  bytes for `circle_000.png`), so the dataset ids differ. This is documented in DATASETS.md.
+- **Lock files:** `lock-cpu-linux.txt` (45 lines) and `lock-dev-cpu-linux.txt` (56 lines), both
+  from `scripts/lock_cpu_linux.sh` in the pinned image.
+- **Fresh-clone Quick Start B** (native Windows, PowerShell 5.1):
+  - **Clone:** `git clone` of the local repo at 4c9f83f.
+  - **First attempt:** it failed in `python -m venv`, because `ensurepip` hit the Windows
+    260-character path limit inside the long scratchpad path. Long paths were not enabled (that
+    is an admin change).
+  - **Second attempt:** rerun in `<home>\vbqs`, with the commands as in the README.
+    `py -3.11` was replaced by the uv-managed Python 3.11.15 path, because `py -3.11` is not
+    registered on this machine.
+
+| step | time |
+|---|---|
+| `venv` | 34.8 s |
+| `pip install --upgrade pip` | 16.9 s |
+| `pip install torch==2.14.1 torchvision==0.29.1 --index-url .../cpu` | 312.7 s |
+| `pip install -e ".[dev]"` | 331.1 s |
+| `npm ci` | 54.3 s |
+| `npm run build` | 18.1 s |
+| `visionbench demo-data var\demo` | 6.3 s |
+| `visionbench dataset import var\demo\shapes --name demo-shapes` → `ds-f7fd8da0fba3` | 12.1 s |
+| import check | `2.14.1+cpu 1.0.0rc1` |
+
+  - **Then `visionbench serve`:**
+    - health was `1.0.0rc1`, and `GET /` returned 200 text/html;
+    - split job 28.8 s, CPU training 18.7 s, VAL evaluation 16.5 s, then predict 200;
+    - VAL balanced accuracy 0.389 is a synthetic sanity check only.
+  - **Clean-up:** the server was stopped, port 8000 was free, and the clone folder was deleted.
+
+**B4 docs.**
+- README: rewritten as described in CHANGELOG 1.0.0-rc1.
+- Commands in the README that were run in this session:
+  - the Quick Start A and B commands (above);
+  - the Docker commands;
+  - the Linux test command;
+  - the frontend commands;
+  - the curl lines carried over from 0c.
+- Two troubleshooting rows came from what happened here: Windows long paths and the Git Bash
+  path rewrite.
+- No LICENSE file: owner TODO.
+
+**Phase C preparation (b1a6ef3, before any TEST access).**
+- **Changes:**
+  - `run_benchmark.py freeze-check` and `evaluate-test`;
+  - `run_robustness.py --split test`;
+  - TEST support in `robustness.report`: the clean reference is the single TEST evaluation,
+    0 or more than 1 is an error, with TEST wording. The VAL report regenerated from the real
+    database **byte-identical** (md and json `cmp`);
+  - `scripts/final_report.py`.
+- **Tests:** `tests/robustness/test_robustness_test_split.py` (2) and
+  `tests/unit/test_final_report.py` (4).
+- **freeze-check trial on the real data root (read-only, 50 s):** hashes OK; plan sha256
+  `11de6e1c…`; 0 TEST evaluations of any kind; `dataset verify --full` exit 0 with the
+  fingerprint matching the protocol; 15/15 checkpoints matching their artifact rows and VAL
+  evaluation records.
+- **Dry run of `final_report.py --split val`** (scratchpad, not committed), labelled
+  "VALIDATION (selection-biased) — not test results":
+  - it reproduces the known VAL multi-seed summary exactly (for example efficientnet 0.9871 ±
+    0.0027, resnet18_scratch 0.9125 ± 0.0485);
+  - the plan was written and hashed before this dry run and was not changed after it.
+- **Rehearsal of the whole C3 sequence on SYNTHETIC data:**
+  - **Setup:**
+    - a throwaway data root, with no contact with `./var`;
+    - 15 tiny shapes runs mapped onto the five protocol model names;
+    - a copy of the frozen protocol files, so the hashes verify;
+    - the scripts unmodified.
+  - **Results:**
+    - `evaluate-test`: 15 TEST evaluations. A second call skipped all 15.
+    - `robustness materialize --split test` without the unlock exited 1 with the locked message.
+      With it, pass 1 wrote and pass 2 verified.
+    - `run_robustness.py --split test`: 15 × 12 evaluated, all attempts completed.
+    - `final_report.py --split test` wrote FINAL_REPORT.md/.json labelled TEST.
+    - `check` then failed as expected, with 15 TEST evaluations and 180 TEST robustness
+      evaluations. C6 changes it.
+  - **Clean-up:** the throwaway root was deleted.
+
+**Gate B** (code at 3677583; the tag is on a docs-only commit after it):
+
+| check | result |
+|---|---|
+| `ruff check .`, `ruff format --check .` | pass (147 files) |
+| full pytest, clean export of 3677583, Windows normal | **359 passed, 1 skipped, 1 warning** (590.24 s) |
+| same, `CUDA_VISIBLE_DEVICES=-1` | **359 passed, 1 skipped, 1 warning** (626.96 s) |
+| same, Linux container (non-root, CPU torch) | **360 passed, 1 warning** (411.68 s) |
+| frontend lint / typecheck / check:api / test:coverage / build | pass / pass / up to date / 42 passed, 87.67 % lines / pass |
+| Playwright e2e (after the e2e_backend change) | **1 passed** (2.7 min) |
+| `run_benchmark.py check` | 0 clean TEST, 0 robustness TEST evaluations (whole DB) |
+| `sha256sum -c` protocol (6) + plan (1) + robustness (2) | 9/9 OK |
+
+- The one warning, in every run, is a `StarletteDeprecationWarning` from
+  `fastapi/testclient.py`: "Using `httpx` with `starlette.testclient` is deprecated; install
+  `httpx2` instead". It concerns the test client only, and was not acted on.
+- The skipped Windows test is the file-symlink case.
+

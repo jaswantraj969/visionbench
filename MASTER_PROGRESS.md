@@ -32,17 +32,17 @@ Status values: todo / in progress / done / blocked.
 
 | step | status | commit | notes |
 |---|---|---|---|
-| B1 Docker (files; build/run if available) | in progress | | Docker CLI 29.7.2 installed; daemon not running at start; started the installed Docker Desktop (user-level app, no install/admin): daemon 29.7.2 linux/amd64 up |
-| B2 Linux test run + CI workflow | todo | | GitHub Actions cannot run: no remote |
-| B3 demo-data, fresh-clone Quick Start, lock files | todo | | |
-| B4 documentation | todo | | |
-| GATE B + tag v1.0.0-rc1 | todo | | |
+| B1 Docker (files; build/run if available) | done | d411106 | Docker Desktop started (user-level app); image built (1.87 GB), compose up healthy, uid 10001, 127.0.0.1-only publish, guards hold, import/split/train/eval jobs in the container, volume survives recreate |
+| B2 Linux test run + CI workflow | done | d411106, 3677583 | Linux container (python 3.11.18, CPU torch, non-root): ruff OK, 360 passed at 3677583; ci.yml written, NOT run on GitHub Actions (no remote) |
+| B3 demo-data, fresh-clone Quick Start, lock files | done | d411106, 4c9f83f | native Quick Start from a fresh clone of 4c9f83f (Windows, CPU torch) and Docker Quick Start at 3677583 (PowerShell) both worked; Linux CPU locks generated in the pinned image |
+| B4 documentation | done | 4c9f83f, b1a6ef3, Gate B commit | README rewrite, ARCHITECTURE, DATASETS, CHANGELOG, PROJECT_STATUS, IMPLEMENTATION_PLAN |
+| GATE B + tag v1.0.0-rc1 | done | Gate B commit (tag `v1.0.0-rc1`) | suite at 3677583: Windows 359 passed / 1 skipped both modes, Linux 360 passed; frontend lint/typecheck/42 tests/build; e2e 1 passed; check 0 TEST evaluations; hashes OK |
 
 ## Phase C — One-time TEST evaluation
 
 | step | status | commit | notes |
 |---|---|---|---|
-| C1 FINAL_ANALYSIS_PLAN.md + hashes (before any test access) | todo | | |
+| C1 FINAL_ANALYSIS_PLAN.md + hashes (before any test access) | done | 3677583 | plan sha256 11de6e1c…; committed before rc1 (earlier than the task order); 0 TEST evaluations at that commit |
 | C2 freeze checklist (a-g) | todo | | |
 | C3 clean TEST x15, materialize TEST x2, robustness TEST 15x12 | todo | | |
 | C5 FINAL_REPORT.md (+JSON) from a committed script | todo | | |
@@ -70,8 +70,21 @@ Status values: todo / in progress / done / blocked.
   1024 and 768 px).
 - **Docker Desktop:** it was installed but not running. Starting the installed per-user app is
   not a system-software install or admin change, so it was started (Phase B).
+- **Phase C code before rc1:** freeze item (a) requires HEAD to be rc1 or a docs-only
+  descendant, and C4 forbids code changes between evaluations. Everything the TEST run needs
+  was therefore written, tested and committed before rc1 (b1a6ef3): `freeze-check`,
+  `evaluate-test`, `run_robustness.py --split test`, the TEST robustness report and
+  `final_report.py`. The whole pipeline was rehearsed on synthetic data in a throwaway data
+  root. Only C6 (unlocking the app, the Benchmark TEST section, the extended check) changes
+  code after the TEST evaluation.
+- **C1 order:** the plan was committed (3677583) before Gate B rather than after it. It is
+  still before any TEST access, which is what the rule protects. Its hash file is
+  `FINAL_ANALYSIS_PLAN_HASHES.txt` (the name the API view already expected).
+- **Freeze item (f):** the full suite is run again in both modes on the exact HEAD at C2,
+  even though HEAD is a docs-only descendant of the tested 3677583.
 
 ## Next action
 
-Phase B: build and run the image (B1); Linux test run in a container (B2); fresh-clone Quick
-Start (B3); documentation (B4); Gate B and tag `v1.0.0-rc1`.
+Phase C, C2: freeze checklist on the rc1 commit (a: clean tree, HEAD = rc1; b-e:
+`run_benchmark.py freeze-check`; f: full suite in both modes on HEAD; g: authorization).
+Then C3 per FINAL_ANALYSIS_PLAN.md §2.

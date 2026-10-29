@@ -693,6 +693,7 @@ and the Docker build.
 | pretrained training fails offline | ImageNet weights are downloaded on first use; pre-fill `VISIONBENCH_TORCH_HOME` or use `--allow-weight-fallback` |
 | GPU still used with `$env:CUDA_VISIBLE_DEVICES=""` | PowerShell deletes the variable; use `"-1"` |
 | Docker: `failed to connect to the docker API` | start Docker Desktop (or the Docker daemon) first |
+| Git Bash on Windows: `docker compose exec ... /data/demo` fails with `C:/Program Files/Git/data/...` | Git Bash rewrites `/data/...` arguments into Windows paths; prefix the command with `MSYS_NO_PATHCONV=1`, or use PowerShell |
 | Windows: `python -m venv` fails in `ensurepip` with `[WinError 3] The system cannot find the path specified` | the clone's path is too long for the 260-character limit (pip's own files are deeply nested); clone into a short path such as `C:\Users\<you>\vb`, or enable Windows long paths (admin) |
 
 ## Limitations

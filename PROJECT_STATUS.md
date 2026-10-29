@@ -1,6 +1,6 @@
 # Project Status
 
-_Last updated: 2026-10-29, end of M6 (robustness under fixed corruptions, VALIDATION only; pending supervisor review)._
+_Last updated: 2026-10-29, release candidate `v1.0.0-rc1` (M7 frontend, packaging, Phase C prepared; TEST split not yet evaluated)._
 
 ## Current state
 - **M0:** foundation (config, seeding, env info, health/ready API).
@@ -100,9 +100,41 @@ _Last updated: 2026-10-29, end of M6 (robustness under fixed corruptions, VALIDA
     `benchmarks/eurosat-v1/results/robustness_val.md`. Every number there is VALIDATION
     (selection-biased), not test results;
   - **0 test evaluations of any kind (clean or robustness) in the whole database.**
-- There is no authentication or frontend.
+- **M7** (frontend):
+  - React + TypeScript SPA with 9 pages over the API, served from the same origin by
+    `visionbench serve`;
+  - read-only views (overview, benchmarks, documents, robustness suites, seeded split sample,
+    audit, experiment tags);
+  - API types generated from OpenAPI, with a stale check;
+  - 42 component tests, and a Playwright e2e against a real backend with synthetic data;
+  - the e2e found that the API refused same-origin POSTs from the served frontend. Fixed: the
+    API's own origin is now accepted.
+- **Release engineering:**
+  - Docker image (CPU, non-root, `/data` volume, healthcheck) and compose (127.0.0.1 only);
+  - `serve --allow-non-loopback`, which works in the container only;
+  - Linux CPU lock files, `scripts/linux_tests.sh` and a CI workflow (not run on GitHub);
+  - `visionbench demo-data`;
+  - full documentation.
+- **Phase C prepared** (no TEST access):
+  - `FINAL_ANALYSIS_PLAN.md` committed and hashed;
+  - `run_benchmark.py freeze-check` / `evaluate-test`, `run_robustness.py --split test`, TEST
+    robustness report and `scripts/final_report.py`;
+  - dry-run of the report on VALIDATION; the whole TEST pipeline rehearsed on synthetic data;
+  - **0 TEST evaluations of any kind in the database.**
+- There is no authentication: the app is for local use only.
 
 ## Verified in session (2026-10-27, Windows 11, Python 3.11.15, torch 2.14.1+cu130, RTX 3050 6GB)
+- **`v1.0.0-rc1` (2026-10-29, code at 3677583):**
+  - `ruff` passes;
+  - pytest on a clean export: 359 passed and 1 skipped in both Windows modes (590.24 s /
+    626.96 s), and 360 passed in the Linux container (non-root, CPU torch, 411.68 s);
+  - frontend: lint, typecheck, 42 tests (87.67 % lines) and build pass;
+  - Playwright e2e: 1 passed;
+  - Docker: the image builds and runs healthy, and the Quick Start commands work;
+  - native fresh-clone Quick Start: works;
+  - `freeze-check` trial: items b-e pass;
+  - 0 TEST evaluations.
+  - Details: REVIEW_PACKET.md "Phase B".
 - M6 (2026-10-29, after the last code change): `ruff check .` / `ruff format --check .` pass;
   `pytest -q --cov=visionbench`: 338 passed and 1 skipped in 340.31 s, coverage 92 % (robustness modules 79-91 %); with `CUDA_VISIBLE_DEVICES=-1`: 338 passed and 1 skipped in 421.14 s.
 - M6 runs: materialization of the 12 VAL conditions re-verified byte for byte on the canonical
@@ -154,9 +186,10 @@ _Last updated: 2026-10-29, end of M6 (robustness under fixed corruptions, VALIDA
 - Robustness to anything except the four synthetic corruptions at their three severities; the
   TEST split (M8). JPEG bytes depend on the Pillow / libjpeg build; materialization was
   checked on this machine only.
-- The CI workflow has never run. The file-symlink test is skipped on this machine.
-- Linux/macOS process handling: psutil and the `fcntl.flock` branch of the worker lock were
-  not run on POSIX.
+- The CI workflow has never run on GitHub Actions (no remote). Its steps were run locally.
+  The file-symlink test is skipped on this machine.
+- macOS. Linux was exercised only in the `python:3.11-slim` container (CPU torch), not on a
+  Linux host with a GPU.
 - Concurrency beyond one API process + one worker; very large uploads (limits are tested with
   small values).
 - Python 3.12/3.13.
@@ -173,7 +206,9 @@ _Last updated: 2026-10-29, end of M6 (robustness under fixed corruptions, VALIDA
   low-information images, mostly SeaLake and Forest) cannot be checked by hashing.
 
 ## Blockers
-- None. M6 awaits supervisor review (REVIEW_PACKET.md).
+- None. (Docker Desktop was installed but stopped; it was started as a user-level app.)
 
 ## Next task
-M7 (per IMPLEMENTATION_PLAN.md): frontend over the API. M8: the single final TEST evaluation (clean and robustness, all runs).
+M8 / Phase C: freeze checklist, then the single TEST evaluation (clean + robustness, all 15
+runs) per `benchmarks/eurosat-v1/FINAL_ANALYSIS_PLAN.md`, the final report, and unlocking the
+app. Then screenshots and `v1.0.0`.

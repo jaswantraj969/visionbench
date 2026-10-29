@@ -154,7 +154,10 @@ decision.
 - It is generated locally by `visionbench.data.demo`: no download and no third-party content.
 - Three classes: `circle`, `square` and `triangle`.
 - Each image is 32 × 32 px RGB: one filled shape in a random colour on a noisy background.
-- The default is 40 per class. The content is deterministic for a seed (default 0).
+- The default is 40 per class. The pixels are deterministic for a seed (default 0).
+- The PNG bytes, and so the dataset fingerprint and id, can differ between platforms. This was
+  checked: the container (zlib 1.3.1) and Windows (zlib 1.3.2) produced identical pixels but
+  different PNG bytes.
 - `demo-data <out>` writes `<out>/shapes/<class>/*.png` (for `dataset import`) and
   `<out>/shapes.zip` (for the web upload).
 
