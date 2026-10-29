@@ -24,6 +24,10 @@ ORIENTATION_POLICY = "exif_transposed"
 PILLOW_FORMATS = ("JPEG", "PNG", "BMP", "WEBP")
 
 
+class ImageTooLargeError(ValueError):
+    """The image header declares more pixels than the caller's limit (nothing was decoded)."""
+
+
 @dataclass(frozen=True)
 class DecodedImage:
     image: Image.Image  # fully loaded, EXIF orientation applied, file handle closed
@@ -32,15 +36,24 @@ class DecodedImage:
 
 
 def decode_image(
-    source: bytes | Path, *, formats: tuple[str, ...] = PILLOW_FORMATS
+    source: bytes | Path,
+    *,
+    formats: tuple[str, ...] = PILLOW_FORMATS,
+    max_pixels: int | None = None,
 ) -> DecodedImage:
     """Open ``source`` (bytes or a path), decode it completely and apply EXIF orientation.
 
-    Raises whatever Pillow raises for unreadable, truncated or oversized images; callers decide
-    how to report that.
+    With ``max_pixels``, the size in the image header is checked before any pixel is decoded
+    (:class:`ImageTooLargeError`). Otherwise raises whatever Pillow raises for unreadable,
+    truncated or oversized images; callers decide how to report that.
     """
     fp = io.BytesIO(source) if isinstance(source, bytes) else source
     with Image.open(fp, formats=formats) as im:
+        if max_pixels is not None and im.width * im.height > max_pixels:
+            raise ImageTooLargeError(
+                f"image is {im.width}x{im.height} = {im.width * im.height} pixels; "
+                f"the limit is {max_pixels}"
+            )
         im.load()
         mode, fmt = im.mode, im.format or ""
         oriented = ImageOps.exif_transpose(im)  # always a new, loaded image

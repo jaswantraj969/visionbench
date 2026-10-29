@@ -27,6 +27,7 @@ import shutil
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -115,6 +116,32 @@ def load_records(datasets_dir: Path, dataset_id: str) -> list[FileRecord]:
     data = read_json(dataset_dir(datasets_dir, dataset_id) / "files.json")
     check_format(data, dataset_id, "files.json")
     return [FileRecord.from_dict(d) for d in data["records"]]
+
+
+@lru_cache(maxsize=16)
+def _records_by_relpath(files_json: str, mtime_ns: int) -> dict[str, FileRecord]:
+    data = read_json(Path(files_json))
+    return {d["relpath"]: FileRecord.from_dict(d) for d in data["records"]}
+
+
+def recorded_image(
+    datasets_dir: Path, dataset_id: str, relpath: str
+) -> tuple[FileRecord, Path] | None:
+    """The record and file of ``relpath`` if it is a recorded member of the dataset, else None.
+
+    ``relpath`` is only used as a dictionary key, never joined onto a filesystem path: the path
+    is built from the stored record and must stay inside the snapshot's ``raw/`` directory.
+    """
+    root = dataset_dir(datasets_dir, dataset_id)
+    files_json = root / "files.json"
+    record = _records_by_relpath(str(files_json), files_json.stat().st_mtime_ns).get(relpath)
+    if record is None:
+        return None
+    raw = (root / "raw").resolve()
+    path = raw.joinpath(*record.relpath.split("/")).resolve()
+    if raw not in path.parents or not path.is_file():
+        return None
+    return record, path
 
 
 def list_datasets(datasets_dir: Path) -> list[dict[str, Any]]:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -28,8 +27,13 @@ from visionbench.data.archive import (
     upload_path,
     validate_archive,
 )
-from visionbench.data.records import FileRecord
-from visionbench.data.store import dataset_dir, list_datasets, load_dataset, validate_name
+from visionbench.data.store import (
+    dataset_dir,
+    list_datasets,
+    load_dataset,
+    recorded_image,
+    validate_name,
+)
 from visionbench.jobs.params import DatasetImportParams, DatasetSplitParams, DatasetVerifyParams
 
 router = APIRouter(prefix="/api/datasets", tags=["datasets"])
@@ -125,12 +129,6 @@ def get_dataset(request: Request, dataset_id: str = DatasetId) -> dict[str, Any]
     }
 
 
-@lru_cache(maxsize=16)
-def _records(files_json: str, mtime_ns: int) -> dict[str, FileRecord]:
-    data = read_json(Path(files_json))
-    return {d["relpath"]: FileRecord.from_dict(d) for d in data["records"]}
-
-
 @router.get("/{dataset_id}/images", response_class=FileResponse)
 def get_image(
     request: Request,
@@ -139,16 +137,10 @@ def get_image(
 ) -> FileResponse:
     """Serve an image ONLY if ``relpath`` is a recorded member of the dataset: the user value
     is used as a dictionary key, never joined onto a filesystem path."""
-    root = dataset_dir(settings_of(request).data_dir("datasets"), dataset_id)
-    files_json = root / "files.json"
-    record = _records(str(files_json), files_json.stat().st_mtime_ns).get(relpath)
-    not_found = ApiError(404, "image_not_found", "no such image in this dataset")
-    if record is None:
-        raise not_found
-    raw = (root / "raw").resolve()
-    path = raw.joinpath(*record.relpath.split("/")).resolve()  # from the stored record
-    if raw not in path.parents or not path.is_file():
-        raise not_found
+    found = recorded_image(settings_of(request).data_dir("datasets"), dataset_id, relpath)
+    if found is None:
+        raise ApiError(404, "image_not_found", "no such image in this dataset")
+    record, path = found
     return FileResponse(path, media_type=MEDIA_TYPES.get(record.format, "application/octet-stream"))
 
 

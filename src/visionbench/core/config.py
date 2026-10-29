@@ -56,6 +56,17 @@ class Settings(BaseSettings):
     zip_max_uncompressed_mb: int = Field(default=4096, ge=1)
     zip_max_ratio: float = Field(default=100.0, gt=1)
 
+    # Synchronous inference in the API process (M5; see visionbench.inference). CPU by default so
+    # that interactive requests never compete with a training job for the GPU.
+    inference_device: Literal["cpu", "cuda", "auto"] = "cpu"
+    inference_threads: int | None = Field(default=None, ge=1)  # torch intra-op threads (process)
+    inference_cache_size: int = Field(default=2, ge=1)  # loaded models kept (LRU)
+    inference_max_concurrent: int = Field(default=1, ge=1)
+    inference_wait_seconds: float = Field(default=2.0, ge=0)  # wait for a free slot, then 429
+    inference_max_upload_mb: int = Field(default=10, ge=1)
+    # TEST-split images cannot be sent to predict/gradcam until the final test evaluation (M8).
+    test_images_unlocked: bool = False
+
     @property
     def resolved_data_root(self) -> Path:
         return self.data_root.expanduser().resolve()
