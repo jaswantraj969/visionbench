@@ -21,7 +21,7 @@ from visionbench.core.process import (
 )
 from visionbench.jobs.store import JobStore
 from visionbench.jobs.worker import WorkerError, WorkerLock, recover, worker_lock
-from visionbench.tracking.store import DB_FILENAME, ExperimentStore
+from visionbench.tracking.store import DB_FILENAME, SCHEMA_VERSION, ExperimentStore
 
 PARAMS = {"dataset_id": "ds-000000000000"}
 SLEEP = [sys.executable, "-c", "import time; time.sleep(60)"]
@@ -241,6 +241,7 @@ def test_schema_upgrade_from_v4_adds_creation_time_columns(tmp_path: Path) -> No
         "ALTER TABLE jobs DROP COLUMN worker_create_time;"
         "ALTER TABLE jobs DROP COLUMN child_create_time;"
         "ALTER TABLE experiments DROP COLUMN runner_create_time;"
+        "ALTER TABLE experiments DROP COLUMN stopped_reason;"
         "UPDATE schema_version SET version = 4;"
     )
     con.close()
@@ -248,7 +249,7 @@ def test_schema_upgrade_from_v4_adds_creation_time_columns(tmp_path: Path) -> No
         row = s.get(job)
     assert row["worker_pid"] == 4242 and row["worker_create_time"] is None
     con = sqlite3.connect(db)
-    assert con.execute("SELECT version FROM schema_version").fetchall() == [(5,)]
+    assert con.execute("SELECT version FROM schema_version").fetchall() == [(SCHEMA_VERSION,)]
     columns = {r[1] for r in con.execute("PRAGMA table_info(experiments)")}
     con.close()
-    assert "runner_create_time" in columns
+    assert {"runner_create_time", "stopped_reason"} <= columns

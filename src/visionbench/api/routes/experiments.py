@@ -55,6 +55,7 @@ def _summary(row: dict[str, Any]) -> dict[str, Any]:
         "seed",
         "best_epoch",
         "best_metric",
+        "stopped_reason",
         "train_seconds",
         "created_at",
         "started_at",

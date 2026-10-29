@@ -199,12 +199,12 @@ Notes:
 The majority baseline uses the same path but needs only labels. It fits train priors, scores the
 val labels, and writes `checkpoints/baseline.json`. It opens no images.
 
-### Database schema (`db/visionbench.db`, schema version 5)
+### Database schema (`db/visionbench.db`, schema version 6)
 
 | Table | Columns |
 |---|---|
 | `schema_version` | `version` (PK), `applied_at` |
-| `experiments` | `id` (PK), `created_at`, `started_at`, `finished_at`, `status`, `error`, `dataset_id`, `split_id`, `dataset_fingerprint`, `model`, `weights_source`, `weights_enum`, `weights_sha256`, `config_json`, `env_json`, `seed`, `best_epoch`, `best_metric`, `train_seconds`, `run_dir`, `runner_pid` (v4), `runner_create_time` (v5) |
+| `experiments` | `id` (PK), `created_at`, `started_at`, `finished_at`, `status`, `error`, `dataset_id`, `split_id`, `dataset_fingerprint`, `model`, `weights_source`, `weights_enum`, `weights_sha256`, `config_json`, `env_json`, `seed`, `best_epoch`, `best_metric`, `train_seconds`, `run_dir`, `runner_pid` (v4), `runner_create_time` (v5), `stopped_reason` (v6: `early_stopping`\|`epochs_completed`\|`max_steps`\|`baseline_fit`, set when a run completes) |
 | `epoch_metrics` | `id`, `experiment_id` (FK), `epoch`, `train_loss`, `val_loss`, `val_accuracy`, `val_balanced_accuracy`, `lr`, `epoch_seconds`, `steps` |
 | `artifacts` | `id`, `experiment_id` (FK), `kind`, `relpath` (relative to data root), `sha256`, `size_bytes`, `created_at` |
 | `evaluations` (M3) | `id` (PK), `experiment_id` (FK), `split` (`val`\|`test`), `checkpoint` (`best`\|`last`\|`baseline`), `created_at`, `metrics_path`, `predictions_sha256`, `visionbench_version`, `forced`, `reason` (v3) |
@@ -214,7 +214,9 @@ val labels, and writes `checkpoints/baseline.json`. It opens no images.
 - Upgrades are additive only: `create_all` adds missing tables, and a fixed list of missing
   columns is added with `ALTER TABLE ... ADD COLUMN` (v3: `evaluations.forced/reason`; v4:
   `experiments.runner_pid`; v5: `experiments.runner_create_time`,
-  `jobs.worker_create_time/child_create_time`). v1 → … → v5 databases upgrade in place. A stored
+  `jobs.worker_create_time/child_create_time`; v6: `experiments.stopped_reason`). v1 → … → v6
+  databases upgrade in place. Experiments completed before v6 were backfilled once from their
+  own `train.log` (`scripts/backfill_stopped_reason.py`, which changes no other field). A stored
   version newer than the code is an error; there are no migrations (Alembic) yet.
 - Every connection sets `PRAGMA busy_timeout=30000`. `journal_mode=WAL` is set once when the
   engine is opened (retried, because a database whose last writer was hard-killed can briefly

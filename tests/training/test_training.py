@@ -105,6 +105,8 @@ def test_early_stopping_on_plateau_and_best_epoch(train_env) -> None:
     )
     result = run_training(cfg, train_env.settings)
     assert result.stopped_reason == "early_stopping"
+    with ExperimentStore(train_env.settings.data_dir("db") / DB_FILENAME) as es:
+        assert es.get(result.experiment_id)["stopped_reason"] == "early_stopping"  # schema v6
     assert len(result.history) == 3 and result.best_epoch == 1  # 1 best + 2 without improvement
     best = read_json(result.run_dir / "checkpoints" / "best.json")
     assert best["epoch"] == 1 and best["metrics"]["val_loss"] == result.history[0]["val_loss"]

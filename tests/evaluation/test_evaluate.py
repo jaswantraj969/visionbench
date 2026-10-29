@@ -22,7 +22,12 @@ from visionbench.evaluation.data import (
 from visionbench.evaluation.evaluate import evaluate_experiment
 from visionbench.evaluation.latency import measure_experiment_latency
 from visionbench.models.small_cnn import SmallCNN
-from visionbench.tracking.store import DB_FILENAME, ExperimentStore, TrackingError
+from visionbench.tracking.store import (
+    DB_FILENAME,
+    SCHEMA_VERSION,
+    ExperimentStore,
+    TrackingError,
+)
 from visionbench.training import data as data_mod
 from visionbench.training.data import SplitAccessError, select_entries
 from visionbench.training.runner import TrainingError, run_training
@@ -335,7 +340,7 @@ def test_schema_upgrade_from_v1(tmp_path: Path) -> None:
     with ExperimentStore(db) as s:
         assert s.evaluations() == []
     con = sqlite3.connect(db)
-    assert con.execute("SELECT version FROM schema_version").fetchall() == [(5,)]
+    assert con.execute("SELECT version FROM schema_version").fetchall() == [(SCHEMA_VERSION,)]
     con.execute("UPDATE schema_version SET version = 99")
     con.commit()
     con.close()
@@ -422,7 +427,7 @@ def test_schema_upgrade_from_v2_adds_forced_columns(tmp_path: Path) -> None:
         (row,) = s.evaluations()
     assert row["id"] == "ev-old" and row["forced"] is False and row["reason"] is None
     con = sqlite3.connect(db)
-    assert con.execute("SELECT version FROM schema_version").fetchall() == [(5,)]
+    assert con.execute("SELECT version FROM schema_version").fetchall() == [(SCHEMA_VERSION,)]
     con.close()
 
 

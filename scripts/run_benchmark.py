@@ -300,18 +300,23 @@ class Benchmark:
         pilot = set()
         if pilot_path.is_file():
             pilot = set(json.loads(pilot_path.read_text(encoding="utf-8"))["pilot_experiment_ids"])
+        repro_path = self.dir / "repro_check.json"  # excluded from results, still checked
+        if repro_path.is_file():
+            pilot.add(
+                json.loads(repro_path.read_text(encoding="utf-8"))["repro_check_experiment_id"]
+            )
         with self.store() as es:
             test_evals = [
                 e for e in es.evaluations(split="test") if e["experiment_id"] in bench | pilot
             ]
             all_test = es.evaluations(split="test")
             val_evals = [e for e in es.evaluations(split="val") if e["experiment_id"] in bench]
-        print(f"benchmark experiments: {len(bench)}; pilot experiments: {len(pilot)}")
+        print(f"benchmark experiments: {len(bench)}; pilot + repro-check experiments: {len(pilot)}")
         print(f"val evaluations of benchmark experiments: {len(val_evals)}")
         print(f"test evaluations of benchmark or pilot experiments: {len(test_evals)}")
         print(f"test evaluations in the whole database: {len(all_test)}")
         assert not test_evals, f"TEST evaluations exist: {[e['id'] for e in test_evals]}"
-        print("OK: no test evaluation exists for any benchmark or pilot experiment")
+        print("OK: no test evaluation exists for any benchmark, pilot or repro-check experiment")
 
     def summary(self) -> str:
         from visionbench.core.jsonio import read_json

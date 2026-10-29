@@ -7,9 +7,9 @@ epoch_metrics, artifacts; v2 (M3) evaluations; v3 (M4 step 0) evaluations.forced
 latency_measurements; v4 (M4) jobs table (``visionbench.jobs.store``) and
 experiments.runner_pid; v5 (M4.1) process creation times next to every recorded pid
 (jobs.worker_create_time/child_create_time, experiments.runner_create_time; see
-:mod:`visionbench.core.process`). A stored version newer than this code is an error. Status
-transitions are enforced: pending -> running -> completed | failed | cancelled (pending may also
-go to failed/cancelled).
+:mod:`visionbench.core.process`); v6 (M5 step 0) experiments.stopped_reason. A stored version
+newer than this code is an error. Status transitions are enforced: pending -> running ->
+completed | failed | cancelled (pending may also go to failed/cancelled).
 """
 
 from __future__ import annotations
@@ -39,11 +39,15 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 from visionbench.core.errors import VisionBenchError
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 # Columns added to tables after they were first created (older DBs get ALTER TABLE ADD COLUMN).
 _COLUMN_UPGRADES: dict[str, dict[str, str]] = {
     "evaluations": {"forced": "BOOLEAN NOT NULL DEFAULT 0", "reason": "TEXT"},
-    "experiments": {"runner_pid": "INTEGER", "runner_create_time": "REAL"},
+    "experiments": {
+        "runner_pid": "INTEGER",
+        "runner_create_time": "REAL",
+        "stopped_reason": "VARCHAR(32)",
+    },
     "jobs": {"worker_create_time": "REAL", "child_create_time": "REAL"},
 }
 DB_FILENAME = "visionbench.db"
@@ -105,6 +109,9 @@ class Experiment(Base):
     run_dir: Mapped[str] = mapped_column(String(255))
     runner_pid: Mapped[int | None] = mapped_column(Integer)  # process running the training
     runner_create_time: Mapped[float | None] = mapped_column(Float)  # its identity (with pid)
+    # Why training ended (early_stopping | epochs_completed | max_steps | baseline_fit); set when
+    # the run completes, NULL for failed/cancelled runs.
+    stopped_reason: Mapped[str | None] = mapped_column(String(32))
 
 
 class EpochMetric(Base):
@@ -306,6 +313,7 @@ class ExperimentStore:
             "train_seconds",
             "runner_pid",
             "runner_create_time",
+            "stopped_reason",
         }
         if set(fields) - allowed:
             raise TrackingError(f"cannot update fields {sorted(set(fields) - allowed)}")

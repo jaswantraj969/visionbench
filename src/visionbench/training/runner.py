@@ -485,6 +485,7 @@ def run_training(
             exp_id,
             best_epoch=result.best_epoch,
             best_metric=None if best is None or math.isnan(best) else best,
+            stopped_reason=result.stopped_reason,
         )
         store.transition(exp_id, "completed")
         status = "completed"

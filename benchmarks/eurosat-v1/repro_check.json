@@ -1,0 +1,88 @@
+{
+  "label": "repro-check - excluded from all benchmark results",
+  "model": "resnet18_scratch_64",
+  "seed": 1,
+  "config": "resnet18_scratch_64.yaml",
+  "config_sha256": "11599a26a4228047fae6a106e5531caccbe4c050d90b1f798979293095b5f823",
+  "reference_experiment_id": "exp-20261027-202124-e89a98",
+  "repro_check_experiment_id": "exp-20261028-090206-78eeb8",
+  "started_at": "2026-10-28T07:18:35+00:00",
+  "finished_at": "2026-10-29T04:02:44+00:00",
+  "wall_seconds": 74658.0,
+  "log": "var/benchmarks/eurosat-v1/logs/repro_check_resnet18_scratch_64_seed1.log",
+  "experiment_fields": {
+    "status": {
+      "reference": "completed",
+      "rerun": "completed"
+    },
+    "best_epoch": {
+      "reference": 5,
+      "rerun": 5
+    },
+    "best_metric": {
+      "reference": 0.39823326600922476,
+      "rerun": 0.39823326600922476
+    },
+    "stopped_reason": {
+      "reference": "early_stopping",
+      "rerun": "early_stopping"
+    },
+    "seed": {
+      "reference": 1,
+      "rerun": 1
+    },
+    "model": {
+      "reference": "resnet18",
+      "rerun": "resnet18"
+    }
+  },
+  "train_seconds": {
+    "reference": 371.65002079999977,
+    "rerun": 68442.0240778
+  },
+  "history": {
+    "fields_compared": [
+      "epoch",
+      "is_best",
+      "lr",
+      "steps",
+      "train_loss",
+      "train_samples",
+      "val_accuracy",
+      "val_balanced_accuracy",
+      "val_loss"
+    ],
+    "fields_excluded": [
+      "epoch_seconds"
+    ],
+    "epochs_reference": 10,
+    "epochs_rerun": 10,
+    "bitwise_identical": true,
+    "differences": [],
+    "differences_total": 0
+  },
+  "best_pt": {
+    "file": "best.pt",
+    "epoch_reference": 5,
+    "epoch_rerun": 5,
+    "metrics_identical": true,
+    "tensors": 122,
+    "tensors_differing": 0,
+    "first_differing_tensors": [],
+    "max_abs_difference": 0.0,
+    "bitwise_identical": true
+  },
+  "last_pt": {
+    "file": "last.pt",
+    "epoch_reference": 10,
+    "epoch_rerun": 10,
+    "metrics_identical": true,
+    "tensors": 122,
+    "tensors_differing": 0,
+    "first_differing_tensors": [],
+    "max_abs_difference": 0.0,
+    "bitwise_identical": true
+  },
+  "bitwise_identical": true,
+  "timing_note": "wall_seconds and train_seconds are NOT representative: the laptop was in Modern Standby from before the experiment was created until 09:02:04Z (experiment created 09:02:06Z), entered Modern Standby again at 09:08:17Z during epoch 3, and slept from 11:41:38Z to 03:49:34Z on 2026-10-29 (Windows System log, Kernel-Power events 506/507/42/107 and Power-Troubleshooter event 1). Epoch 3 therefore took 67390 s. The script does not ask Windows to stay awake (the benchmark driver does). Determinism is unaffected: every compared value is bitwise identical."
+}
