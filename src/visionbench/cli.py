@@ -9,7 +9,7 @@ import argparse
 import json
 import sys
 import traceback
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -93,6 +93,17 @@ def _cmd_dataset_import(args: argparse.Namespace) -> int:
     print(f"  path: {result.path}")
     print(f"  fingerprint: {result.dataset['fingerprint']}")
     _print_report_summary(result.report)
+    return 0
+
+
+def _cmd_demo_data(args: argparse.Namespace) -> int:
+    from visionbench.data.demo import SHAPES, write_demo
+
+    folder, zip_path = write_demo(Path(args.out), args.per_class, args.seed)
+    n = args.per_class * len(SHAPES)
+    print(f"wrote {n} synthetic images ({', '.join(SHAPES)}; seed {args.seed}; not EuroSAT)")
+    print(f"  folder (for `visionbench dataset import`): {folder}")
+    print(f"  zip (for the web upload): {zip_path}")
     return 0
 
 
@@ -462,6 +473,27 @@ def _cmd_worker(args: argparse.Namespace) -> int:
 
 
 LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
+CONTAINER_ENV = "VISIONBENCH_CONTAINER"
+
+
+def bind_refusal(host: str, allow_non_loopback: bool, env: Mapping[str, str]) -> str | None:
+    """Why ``serve`` must not bind to ``host``, or None. The API has no authentication, so only
+    loopback hosts are allowed; ``--allow-non-loopback`` lifts this only inside the container
+    image (which sets ``VISIONBENCH_CONTAINER=1``), where the port is published to the host's
+    127.0.0.1 only and the Host-header allow-list still applies."""
+    if host in LOOPBACK_HOSTS:
+        return None
+    if not allow_non_loopback:
+        return (
+            f"refusing to bind to {host!r}: the API has no authentication; "
+            f"use one of {LOOPBACK_HOSTS}"
+        )
+    if env.get(CONTAINER_ENV) != "1":
+        return (
+            f"refusing to bind to {host!r}: --allow-non-loopback is only for the container image "
+            f"({CONTAINER_ENV}=1)"
+        )
+    return None
 
 
 def _cmd_serve(args: argparse.Namespace) -> int:
@@ -476,13 +508,12 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     s = _settings()
     host = args.host or s.api_host
     port = args.port or s.api_port
-    if host not in LOOPBACK_HOSTS:
-        print(
-            f"error: refusing to bind to {host!r}: the API has no authentication; "
-            f"use one of {LOOPBACK_HOSTS}",
-            file=sys.stderr,
-        )
+    refusal = bind_refusal(host, args.allow_non_loopback, os.environ)
+    if refusal is not None:
+        print(f"error: {refusal}", file=sys.stderr)
         return 2
+    if host not in LOOPBACK_HOSTS:
+        print(f"warning: binding to {host!r} inside the container; publish it to 127.0.0.1 only")
     worker = None
     if not args.no_worker:
         env = os.environ | {"VISIONBENCH_DATA_ROOT": str(s.resolved_data_root)}
@@ -751,12 +782,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     wrk.set_defaults(func=_cmd_worker)
 
+    demo = sub.add_parser(
+        "demo-data",
+        parents=[common],
+        help="write a small synthetic shapes dataset (folder + ZIP) for trying the app",
+    )
+    demo.add_argument("out", help="output directory (gets shapes/ and shapes.zip)")
+    demo.add_argument("--per-class", type=int, default=40, help="images per class (default 40)")
+    demo.add_argument("--seed", type=int, default=0)
+    demo.set_defaults(func=_cmd_demo_data)
+
     srv = sub.add_parser(
         "serve", parents=[common], help="run the API (localhost only) plus one worker"
     )
     srv.add_argument("--host", help="loopback host (default 127.0.0.1)")
     srv.add_argument("--port", type=int, help="port (default 8000)")
     srv.add_argument("--no-worker", action="store_true", help="API only (run a worker yourself)")
+    srv.add_argument(
+        "--allow-non-loopback",
+        action="store_true",
+        help="container image only: allow e.g. --host 0.0.0.0 (publish to 127.0.0.1 only)",
+    )
     srv.set_defaults(func=_cmd_serve)
 
     cmp_ = sub.add_parser("compare", parents=[common], help="compare evaluated experiments")

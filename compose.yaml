@@ -1,0 +1,14 @@
+# VisionBench in a container. The API has no authentication: the port is published to the
+# host's loopback interface only. Data (datasets, runs, database) lives in the named volume.
+services:
+  visionbench:
+    build: .
+    image: visionbench:local
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - visionbench-data:/data
+    restart: unless-stopped
+
+volumes:
+  visionbench-data:

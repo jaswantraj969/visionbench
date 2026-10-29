@@ -1,7 +1,7 @@
 """Start a real VisionBench backend for the frontend end-to-end tests (Playwright).
 
-Creates a fresh temporary data root with nothing in it, writes a synthetic shapes dataset as a
-ZIP (generated here; no download, not EuroSAT) and a small robustness suite, then runs
+Creates a fresh temporary data root with nothing in it, writes the synthetic shapes dataset as a
+ZIP (``visionbench.data.demo``; no download, not EuroSAT) and a small robustness suite, then runs
 ``visionbench serve`` (API + worker + the built frontend) on 127.0.0.1. The paths are written to
 ``<root>/e2e.json`` for the test. The test drives the app through the browser; only the
 materialization of corrupted images (a CLI step by design) runs from the test's Node side.
@@ -13,47 +13,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import io
 import json
 import os
 import subprocess
 import sys
-import zipfile
 from pathlib import Path
 
-import numpy as np
-from PIL import Image, ImageDraw
-
-SHAPES = ("circle", "square", "triangle")
-
-
-def shape_png(rng: np.random.Generator, shape: str, size: int = 32) -> bytes:
-    bg = tuple(int(c) for c in rng.integers(0, 256, 3))
-    arr = np.asarray(Image.new("RGB", (size, size), bg), dtype=np.float64)
-    arr = arr + rng.normal(0, 10, arr.shape)
-    img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
-    draw = ImageDraw.Draw(img)
-    r = int(rng.integers(size // 6, size // 3))
-    cx, cy = (int(v) for v in rng.integers(r + 2, size - r - 2, 2))
-    fg = tuple(int((b + rng.integers(90, 166)) % 256) for b in bg)
-    if shape == "circle":
-        draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=fg)
-    elif shape == "square":
-        draw.rectangle([cx - r, cy - r, cx + r, cy + r], fill=fg)
-    else:
-        draw.polygon([(cx, cy - r), (cx - r, cy + r), (cx + r, cy + r)], fill=fg)
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return buf.getvalue()
-
-
-def write_zip(path: Path, per_class: int, seed: int = 0) -> None:
-    rng = np.random.default_rng(seed)
-    with zipfile.ZipFile(path, "w") as zf:
-        for shape in SHAPES:
-            for i in range(per_class):
-                zf.writestr(f"shapes/{shape}/{shape}_{i:03d}.png", shape_png(rng, shape))
-
+from visionbench.data.demo import write_zip
 
 SUITE = """# Small synthetic suite for the end-to-end test (not a benchmark suite).
 suite: e2e-c-v1

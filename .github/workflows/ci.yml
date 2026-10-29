@@ -1,27 +1,106 @@
-name: CI
+# Continuous integration. NOTE: written and checked locally (the backend suite was run in the same
+# Linux CPU container image setup); this workflow itself has not run on GitHub Actions yet.
+name: ci
 
 on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
+env:
+  TORCH_INDEX: https://download.pytorch.org/whl/cpu
+
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  backend:
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: pip
-      - name: Install CPU torch/torchvision
+      - name: Install (locked, CPU torch)
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-      - name: Install package
-        run: python -m pip install -e ".[dev]"
-      - name: Ruff
+          python -m pip install -r requirements/lock-dev-cpu-linux.txt --extra-index-url "$TORCH_INDEX"
+          python -m pip install -e . --no-deps
+      - run: ruff check .
+      - run: ruff format --check .
+      - name: Tests
+        run: python -m pytest -q --cov=visionbench --cov-report=term-missing
+      - name: Frozen protocol hashes
         run: |
-          ruff check .
-          ruff format --check .
-      - name: Pytest
-        run: pytest -q --cov=visionbench --cov-report=term-missing
+          (cd benchmarks/eurosat-v1 && sha256sum -c PROTOCOL_HASHES.txt)
+          (cd benchmarks/eurosat-v1/robustness && sha256sum -c ROBUSTNESS_HASHES.txt)
+
+  frontend:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test:coverage
+      - run: npm run build
+
+  e2e:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install backend (locked, CPU torch)
+        run: |
+          python -m pip install -r requirements/lock-cpu-linux.txt --extra-index-url "$TORCH_INDEX"
+          python -m pip install -e . --no-deps
+      - name: Install frontend and browser
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: API types are not stale
+        working-directory: frontend
+        env:
+          VISIONBENCH_PYTHON: python
+        run: npm run check:api
+      - name: Build and run the end-to-end test against a real backend
+        working-directory: frontend
+        env:
+          VISIONBENCH_PYTHON: python
+        run: |
+          npm run build
+          npm run e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: frontend/test-results/
+
+  docker:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t visionbench:ci .
+      - name: Container starts and is healthy
+        run: |
+          docker run -d --name vb -p 127.0.0.1:8000:8000 visionbench:ci
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8000/api/health && exit 0
+            sleep 2
+          done
+          docker logs vb
+          exit 1

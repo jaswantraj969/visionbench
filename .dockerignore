@@ -1,0 +1,22 @@
+# Keep the build context small and free of data, weights, secrets and local environments.
+.git
+.venv
+var
+**/__pycache__
+**/*.py[cod]
+**/*.egg-info
+.pytest_cache
+.ruff_cache
+.coverage
+.coverage.*
+htmlcov
+*.pt
+*.pth
+*.ckpt
+.env
+frontend/node_modules
+frontend/dist
+frontend/coverage
+frontend/test-results
+frontend/playwright-report
+frontend/*.tsbuildinfo
