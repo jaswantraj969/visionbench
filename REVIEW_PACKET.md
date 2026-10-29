@@ -343,6 +343,110 @@ privilege.
 
 ---
 
+# VB-FINAL — top summary (STOPPED in Phase C, step C3)
+
+Written 2026-10-29 at the stop. Evidence for each phase follows under "VB-FINAL — evidence by
+phase".
+
+**Delivered and verified in this session:**
+- **Phase 0:** the M6 follow-ups and Gate 0.
+- **Phase A:** the M7 frontend (9 pages, 42 component tests, Playwright e2e) and Gate A. That
+  includes a page-by-page walk on the real data root.
+- **Phase B:** Docker image and compose; Linux container test run; CI workflow file; demo-data;
+  native and Docker Quick Start; Linux CPU locks; full documentation; Gate B; tag
+  **`v1.0.0-rc1`**.
+- **Phase C preparation and plan:**
+  - `FINAL_ANALYSIS_PLAN.md` committed and hashed before any TEST access;
+  - TEST drivers, `freeze-check` and `final_report.py`, committed in rc1;
+  - VAL dry run of the report;
+  - a synthetic end-to-end rehearsal.
+- **C2:** freeze checklist, all items a-g pass.
+- **C3, partly:**
+  - **the 15 clean TEST evaluations are done**, each on its first attempt;
+  - one per run, on the val-selected checkpoint;
+  - none forced;
+  - recorded in `benchmarks/eurosat-v1/results/test_runs.json`.
+
+**Stopped:**
+- **Where:** C3, "materialize TEST pass 1".
+- **Error:** `error: gaussian_noise/0.04: stored condition covers different images`.
+- **Cause, from reading the code:** the corrupted-image cache is laid out as
+  `cache/corruptions/<dataset>/<split_id>/<suite>/<corruption>/<severity>/`
+  (`src/visionbench/robustness/materialize.py:3`, `:104`). The path has no val/test component, so
+  the TEST pass finds the M6 VAL `condition.json` in the same folder. It refuses because the image
+  sets differ (`materialize.py:191-192`).
+- **Classification:** a code defect, not an infrastructure failure. STOP condition 2 and plan
+  §3.3 therefore apply: nothing was changed or rerun.
+- **State, checked read-only:**
+  - nothing was written by the failed pass: the newest cache file is from 06:25:54 UTC (M6); the
+    pass ran at 11:32 UTC;
+  - the 12 VAL conditions still verify (manifest hash and every file's sha256);
+  - 0 robustness TEST rows.
+- **Why the rehearsal missed it:** its throwaway data root never had a VAL materialization before
+  the TEST one, and neither did the new TEST-split test. That gap in the rehearsal is mine.
+
+**Not produced because of the stop:**
+- the 180 robustness TEST evaluations;
+- `results/FINAL_REPORT.md/.json` and `results/robustness_test.md/.json`;
+- unlocking the app and the Benchmark TEST section (C6);
+- screenshots (D1) and the README results update (D2);
+- tag `v1.0.0`.
+
+No TEST metric has been computed into a report or read for this summary.
+
+**Owner decisions needed:**
+1. **How to continue the robustness TEST evaluation.** Any route deviates from C4 ("no code
+   changes between evaluations") or from the plan's commands, so it must be approved.
+   - **(a) Recommended:** a minimal code fix.
+     - TEST conditions get their own cache path (for example `<suite>/test/...`), with tests
+       covering a VAL-then-TEST materialization.
+     - The VAL path stays unchanged, so the 180 VAL rows and the VAL cache stay valid.
+     - The fix would be committed and recorded as a dated deviation.
+     - The 15 clean TEST evaluations are not affected by this code and would **not** be redone.
+   - **(b)** Move the VAL cache aside, materialize and evaluate TEST in its place, then restore
+     it. This needs no code change, but it is a manual data-layout operation.
+   - **(c)** Stop at the clean TEST results and report robustness TEST as not done.
+   - Not viable: `materialize --out` exists, but `robustness evaluate` cannot read from another
+     root.
+2. **Definition of done:** confirm the 14-item list below (reconstructed; the original is not
+   in the repository or this session).
+3. **License:** choose one. There is no LICENSE file, and `pyproject.toml` says "Proprietary".
+
+**Deviations and readings:**
+- **Ordering:**
+  - Phase C code and the plan were committed before rc1. That is stricter than the task order.
+  - Freeze item f was rerun on rc1 itself.
+- **Docker Desktop** was started as an installed user-level app.
+- **Gate A suite output** was captured with `tail -4`, so the one warning's text was first
+  recorded at Gate B. It is a TestClient deprecation.
+- **Linux run, attempt 1:** a wheel download failed pip's hash check (treated as an
+  infrastructure failure) and was rerun.
+- **Responsive layout:** at 768 px, wide tables scroll inside their own box.
+
+**Blocked items:**
+- **GitHub Actions** has not run (no remote; pushing is prohibited).
+- **Phase C after "materialize TEST pass 1", and all of Phase D except this summary**, wait for
+  the owner (decision 1).
+
+### Definition-of-done audit (14 items, reconstructed; status at the stop)
+
+| # | item | status | evidence |
+|---|---|---|---|
+| 1 | Installs from a fresh clone with documented commands | done | Phase B: native fresh-clone Quick Start (Windows) and Docker Quick Start, every command recorded |
+| 2 | Dataset import, validation and statistics report | done | M1/D1; EuroSAT `verify --full` OK at C2 |
+| 3 | Leakage-aware, deterministic splits with an independent audit | done | M1/D1 `audit-split`; split `sp-55320e11726c` frozen |
+| 4 | Model registry incl. majority baseline and pretrained models | done | M2; 5 protocol models |
+| 5 | Training with tracking; selection on VAL only | done | M2/B1; 15 runs in `runs.json` |
+| 6 | Evaluation with CIs, explicit undefined metrics, TEST-use accounting | done | M3; `check` counts every TEST row |
+| 7 | Comparison reports with confound flags; no TEST winner label | done | M3/M4 |
+| 8 | API, single-worker jobs, secure uploads, local-only guards | done | M4/M4.1; same-origin fix found by e2e (9d1678a) |
+| 9 | Prediction and Grad-CAM with sanity checks and stated limitations | done | M5 / M6 step 0 |
+| 10 | Robustness suite with VAL and TEST evaluations | **partial** | VAL 180/180 done (M6); TEST 0/180 (stopped) |
+| 11 | Frontend over the API with tests and an e2e | done | Phase A; Gate A/B |
+| 12 | Frozen benchmark evaluated once on TEST per a committed plan, with a final report | **partial** | plan committed before TEST access; clean TEST 15/15 done; FINAL_REPORT not produced (stopped) |
+| 13 | Packaging: Docker, lock files, CI, documentation | done, except CI on GitHub | Phase B; ci.yml not run on GitHub Actions (no remote) |
+| 14 | Screenshots and an honest results summary in the README | **not done** | blocked by item 12 (Phase D needs C) |
+
 # VB-FINAL — evidence by phase
 
 (The VB-FINAL top summary is written at the top of this file in Phase D.)
@@ -657,4 +761,57 @@ docs commit (tagged).
   `fastapi/testclient.py`: "Using `httpx` with `starlette.testclient` is deprecated; install
   `httpx2` instead". It concerns the test client only, and was not acted on.
 - The skipped Windows test is the file-symlink case.
+
+## Phase C — one-time TEST evaluation (STOPPED in C3)
+
+**C1** (3677583): `FINAL_ANALYSIS_PLAN.md`, sha256
+`11de6e1ccae6866b604a708d948253714862a924b5585e0af976377169eb59fc`, in
+`FINAL_ANALYSIS_PLAN_HASHES.txt`. At that commit the database had 0 TEST evaluations of any kind
+(`check`).
+
+**C2 freeze checklist:**
+
+| item | result |
+|---|---|
+| a. clean tree; HEAD = rc1 or a docs-only descendant | clean; HEAD 288dbe1 = v1.0.0-rc1 + MASTER_PROGRESS.md only |
+| b. hashes verify; plan commit precedes any TEST access | protocol 6/6, robustness 2/2, plan 1/1 OK; plan committed at 3677583 with 0 TEST rows |
+| c. check: 0 TEST evaluations, 0 TEST materializations | 0 clean, 0 robustness TEST evaluations; no TEST condition in the cache |
+| d. `dataset verify --full` passes; fingerprint matches | exit 0; `53a853ae…` = protocol |
+| e. 15 checkpoint sha256 = artifact rows | 15/15 (file = artifact row = VAL evaluation record) |
+| f. full suite on this commit in both modes | `git archive v1.0.0-rc1`: 359 passed / 1 skipped, normal 555.24 s, GPU hidden 554.73 s |
+| g. authorization line | "proceed automatically" |
+
+Items b-e ran as the first step of the C3 runner (`freeze-check`, exit 0 in 44.2 s, 11:24:33
+UTC).
+
+**C3, as run.**
+- **Runner:** a scratchpad script that runs the plan's §2 commands in order, with keep-awake, and
+  stops at the first non-zero exit. `VISIONBENCH_TEST_IMAGES_UNLOCKED=true` was set only for the
+  materialize and report processes, and inside `evaluate-test` only for its evaluation children.
+- **`run_benchmark.py evaluate-test`:** exit 0 in 466.2 s. All 15 runs on attempt 1:
+  - majority_baseline: `ev-20261029-112504-ec73cf`, `ev-20261029-112523-9b58fd`,
+    `ev-20261029-112543-28d2fa`;
+  - resnet18_scratch_64: `ev-20261029-112608-c4d668`, `ev-20261029-112633-e4bace`,
+    `ev-20261029-112658-df5146`;
+  - small_cnn_scratch_64: `ev-20261029-112722-d17c6a`, `ev-20261029-112747-79a389`,
+    `ev-20261029-112811-931ebd`;
+  - resnet18_imagenet_224: `ev-20261029-112850-a00cad`, `ev-20261029-112930-d32a72`,
+    `ev-20261029-113009-789459`;
+  - efficientnet_b0_imagenet_224: `ev-20261029-113052-84ed06`, `ev-20261029-113134-691d5f`,
+    `ev-20261029-113216-4c6760`.
+  - Database afterwards: 15 TEST evaluations, 15 distinct experiments, checkpoints `best` and
+    `baseline`, none forced.
+- **`robustness materialize ... --split test` (pass 1):** exit 1 in 16.4 s, with
+  `error: gaussian_noise/0.04: stored condition covers different images`. **STOP.**
+- **Not run:** materialize pass 2, `run_robustness.py --split test`, `final_report.py`.
+
+**After the stop (read-only checks):**
+- The 12 VAL conditions verify through `load_verified_condition` (condition hash and every file's
+  sha256), all with `split: val`.
+- The newest file in the cache is from 06:25:54 UTC (M6).
+- `check` now raises its assertion, listing the 15 TEST evaluation ids. That is expected:
+  extending it is C6.
+- The app is still locked.
+
+The diagnosis and the owner options are in the top summary.
 

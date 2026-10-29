@@ -43,21 +43,21 @@ Status values: todo / in progress / done / blocked.
 | step | status | commit | notes |
 |---|---|---|---|
 | C1 FINAL_ANALYSIS_PLAN.md + hashes (before any test access) | done | 3677583 | plan sha256 11de6e1c…; committed before rc1 (earlier than the task order); 0 TEST evaluations at that commit |
-| C2 freeze checklist (a-g) | in progress | c2aeec4 (v1.0.0-rc1) | a: clean tree, HEAD = v1.0.0-rc1; f: full suite on a `git archive` of v1.0.0-rc1, 359 passed / 1 skipped normal (555.24 s) and GPU hidden (554.73 s); g: authorization line "proceed automatically"; b-e: `run_benchmark.py freeze-check` is the first step of the C3 run and stops it on failure |
-| C3 clean TEST x15, materialize TEST x2, robustness TEST 15x12 | todo | | |
-| C5 FINAL_REPORT.md (+JSON) from a committed script | todo | | |
-| C6 unlock for the app, Benchmark TEST section, check counts | todo | | |
-| GATE C | todo | | |
+| C2 freeze checklist (a-g) | done | 288dbe1 | a: clean tree, HEAD = docs-only descendant of v1.0.0-rc1; b-e: `freeze-check` exit 0 (hashes OK, plan 11de6e1c…, 0 TEST evaluations, verify --full exit 0 + fingerprint match, 15/15 checkpoints); f: suite on v1.0.0-rc1 359 passed / 1 skipped both modes; g: "proceed automatically" |
+| C3 clean TEST x15, materialize TEST x2, robustness TEST 15x12 | **STOPPED** | (records: this commit) | clean TEST x15: done, all first attempts (`results/test_runs.json`). Materialize TEST pass 1: **non-infrastructure failure** `gaussian_noise/0.04: stored condition covers different images` (the corruption cache path has no val/test component, so TEST collides with the VAL cache); nothing written. Robustness TEST: not run (0 rows). STOP condition 2 / plan §3.3: owner decision needed |
+| C5 FINAL_REPORT.md (+JSON) from a committed script | blocked (C3 stopped) | | the plan runs the report after the robustness TEST evaluations; not run |
+| C6 unlock for the app, Benchmark TEST section, check counts | blocked (C3 stopped) | | the app stays locked; `check` now fails by design (it asserts 0 TEST evaluations; 15 exist) |
+| GATE C | blocked | | |
 
 ## Phase D — Screenshots, docs, release
 
 | step | status | commit | notes |
 |---|---|---|---|
-| D1 screenshots (Playwright, real data root) | todo | | |
-| D2 README results summary + screenshots | todo | | |
-| D3 definition-of-done audit | todo | | |
-| D4 final checks, tag v1.0.0, final packet summary | todo | | |
-| GATE D | todo | | |
+| D1 screenshots (Playwright, real data root) | blocked (needs C) | | |
+| D2 README results summary + screenshots | blocked (needs C) | | |
+| D3 definition-of-done audit | done (as of the stop) | this commit | REVIEW_PACKET top summary |
+| D4 final checks, tag v1.0.0, final packet summary | partial | this commit | packet top summary written; **no `v1.0.0` tag** (the release is not complete) |
+| GATE D | blocked | | |
 
 ## Readings and decisions recorded (task says: take the most reasonable reading and record it)
 
@@ -85,6 +85,10 @@ Status values: todo / in progress / done / blocked.
 
 ## Next action
 
-C3 is being run. **On resume: run `python scripts/run_benchmark.py check benchmarks/eurosat-v1` and read
-`benchmarks/eurosat-v1/results/test_runs.json` first; never repeat a clean TEST evaluation.**
-The drivers skip runs/conditions that already have rows.
+**STOPPED in C3 (STOP condition 2).** Waiting for the owner's decision (REVIEW_PACKET top summary,
+"Owner decisions"). On resume:
+1. Run `python scripts/run_benchmark.py check benchmarks/eurosat-v1`. It must show **15**
+   clean TEST evaluations (one per run) and **0** robustness TEST evaluations. The assertion
+   failure is expected until C6.
+2. **Never repeat a clean TEST evaluation.** `evaluate-test` skips runs that have a TEST row.
+3. Apply only what the owner decided, then continue C3 from "materialize TEST pass 1".

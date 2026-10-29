@@ -1,6 +1,6 @@
 # Project Status
 
-_Last updated: 2026-10-29, release candidate `v1.0.0-rc1` (M7 frontend, packaging, Phase C prepared; TEST split not yet evaluated)._
+_Last updated: 2026-10-29: `v1.0.0-rc1`; Phase C stopped in C3. The 15 clean TEST evaluations are done; the robustness TEST evaluation is blocked by a cache-path defect and awaits the owner (REVIEW_PACKET.md top summary)._
 
 ## Current state
 - **M0:** foundation (config, seeding, env info, health/ready API).
@@ -120,7 +120,12 @@ _Last updated: 2026-10-29, release candidate `v1.0.0-rc1` (M7 frontend, packagin
   - `run_benchmark.py freeze-check` / `evaluate-test`, `run_robustness.py --split test`, TEST
     robustness report and `scripts/final_report.py`;
   - dry-run of the report on VALIDATION; the whole TEST pipeline rehearsed on synthetic data;
-  - **0 TEST evaluations of any kind in the database.**
+  - At rc1: 0 TEST evaluations of any kind in the database.
+- **Phase C, C3 (stopped):**
+  - 15 clean TEST evaluations done (`benchmarks/eurosat-v1/results/test_runs.json`);
+  - TEST materialization refused: the corruption cache path has no val/test component;
+  - 0 robustness TEST evaluations; no final report;
+  - the app stays locked.
 - There is no authentication: the app is for local use only.
 
 ## Verified in session (2026-10-27, Windows 11, Python 3.11.15, torch 2.14.1+cu130, RTX 3050 6GB)
@@ -206,7 +211,9 @@ _Last updated: 2026-10-29, release candidate `v1.0.0-rc1` (M7 frontend, packagin
   low-information images, mostly SeaLake and Forest) cannot be checked by hashing.
 
 ## Blockers
-- None. (Docker Desktop was installed but stopped; it was started as a user-level app.)
+- **Robustness TEST evaluation:** blocked by a code defect. The corruption cache path lacks
+  the val/test part, so TEST materialization collides with the VAL cache. Continuing needs an
+  owner decision (REVIEW_PACKET.md).
 
 ## Next task
 M8 / Phase C: freeze checklist, then the single TEST evaluation (clean + robustness, all 15
