@@ -68,8 +68,13 @@ def test_jobs_run_one_at_a_time_with_progress(train_env, worker) -> None:
 
 
 def test_cooperative_cancel_keeps_partial_history(train_env, worker) -> None:
+    # early stopping off: on a fast machine it would end the tiny run first
     with job_store(train_env.settings) as s:
-        job_id = s.enqueue("train", _train_params(train_env, epochs=500), max_queued=10)
+        job_id = s.enqueue(
+            "train",
+            _train_params(train_env, epochs=500, early_stopping={"enabled": False}),
+            max_queued=10,
+        )
     worker(max_jobs=1)
     wait_for(
         lambda: (get_job(train_env.settings, job_id)["progress"] or {}).get("epoch", 0) >= 1,
@@ -147,8 +152,13 @@ def test_cancel_timeout_terminates_training_child(train_env, worker) -> None:
 
 
 def test_hard_kill_then_recovery_marks_interrupted(train_env, worker) -> None:
+    # early stopping off: on a fast machine it would end the tiny run first
     with job_store(train_env.settings) as s:
-        job_id = s.enqueue("train", _train_params(train_env, epochs=500), max_queued=10)
+        job_id = s.enqueue(
+            "train",
+            _train_params(train_env, epochs=500, early_stopping={"enabled": False}),
+            max_queued=10,
+        )
     w = worker()
     wait_for(
         lambda: (get_job(train_env.settings, job_id)["progress"] or {}).get("epoch", 0) >= 1,
