@@ -35,7 +35,7 @@ from visionbench.data.store import dataset_dir, load_dataset
 from visionbench.evaluation.compare import compare_experiments
 from visionbench.evaluation.data import check_test_reuse, checkpoint_name
 from visionbench.jobs.params import EvaluateParams, LatencyParams, RobustnessParams, TrainParams
-from visionbench.training.config import TrainConfig
+from visionbench.training.config import TrainConfig, display_config
 
 experiments = APIRouter(prefix="/api/experiments", tags=["experiments"])
 evaluations = APIRouter(prefix="/api/evaluations", tags=["evaluations"])
@@ -95,6 +95,8 @@ def get_experiment(request: Request, experiment_id: str = ExperimentId) -> dict[
             **_summary(row),
             "run_dir": row["run_dir"],
             "config": json.loads(row["config_json"]),
+            # training settings as shown to people: "n/a" for those the model does not use
+            "config_display": display_config(json.loads(row["config_json"]).get("config", {})),
             "env": json.loads(row["env_json"]) if row["env_json"] else None,
             "weights_enum": row["weights_enum"],
             "weights_sha256": row["weights_sha256"],

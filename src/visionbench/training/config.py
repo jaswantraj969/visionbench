@@ -112,3 +112,36 @@ def load_train_config(
         return TrainConfig.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(f"invalid training config:\n{exc}") from exc
+
+
+NOT_APPLICABLE = "n/a"
+# Settings the majority baseline never uses (it is fitted once from TRAIN class counts and opens
+# no image); its stored config still holds TrainConfig's defaults for them.
+BASELINE_UNUSED_FIELDS = (
+    "weights",
+    "finetune",
+    "input_size",
+    "epochs",
+    "max_steps",
+    "batch_size",
+    "optimizer",
+    "lr",
+    "weight_decay",
+    "momentum",
+    "scheduler",
+    "early_stopping",
+    "class_weighted_loss",
+    "device",
+    "amp",
+    "num_workers",
+    "augmentation",
+    "allow_weight_fallback",
+)
+
+
+def display_config(config: dict[str, Any]) -> dict[str, Any]:
+    """A training config for display. For ``majority_baseline`` every setting it does not use is
+    shown as ``"n/a"`` instead of the irrelevant defaults; the stored config is not changed."""
+    if config.get("model") != "majority_baseline":
+        return dict(config)
+    return {k: (NOT_APPLICABLE if k in BASELINE_UNUSED_FIELDS else v) for k, v in config.items()}

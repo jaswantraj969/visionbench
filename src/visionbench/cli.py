@@ -341,10 +341,16 @@ def _cmd_experiments_show(args: argparse.Namespace) -> int:
             )
         )
         return 0
+    from visionbench.training.config import display_config
+
     skip = {"config_json", "env_json"}
     for key, value in record.items():
         if key not in skip:
             print(f"{key}: {value}")
+    config = json.loads(record["config_json"]).get("config", {})
+    print("config (n/a = not used by this model):")
+    for key, value in display_config(config).items():
+        print(f"  {key}: {value}")
     print("epochs:")
     for e in epochs:
         print(
