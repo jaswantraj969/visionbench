@@ -138,3 +138,12 @@ grouping, and the D1 audit showed that both perceptual hashes are noise-driven o
 **Near-duplicates among them therefore cannot be assessed by hashing.** Only exact (SHA-256)
 and decoded-pixel duplicates are ruled out (0 across splits). Results for SeaLake and Forest
 should be read with this in mind.
+
+**pHash is also unreliable on dark, low-texture tiles that pass the low-information test.**
+In the D1 audit of the frozen split (`audits/sp-55320e11726c/pairs.csv`, pair `a-001`),
+`Forest/Forest_1552.jpg` (val) and `River/River_1476.jpg` (train) have pHash distance **0** but
+dHash distance 26, and they are visibly different images (dense canopy vs a river with a bank;
+checked side by side, contrast-stretched, on 2026-10-29). Neither is flagged low-information
+(recorded gray std 4.51 and 12.67; the threshold is 3.0). A pHash distance of 0 therefore does not establish a duplicate on such
+tiles; grouping uses dHash only, and the audit's pHash search is evidence for review, not a
+decision.

@@ -438,6 +438,14 @@ model performance.
   driven by noise and compression artefacts. On EuroSAT many Forest and SeaLake images are
   low-information (REVIEW_PACKET.md), so near-duplicates among them are not detectable by
   hashing.
+- pHash is unreliable on dark, low-texture tiles even when they pass the low-information test:
+  the frozen EuroSAT split's audit has a Forest (val) / River (train) pair at pHash distance 0
+  (dHash 26) that is visibly a different image (DATASETS.md). The audit's pHash nearest
+  neighbours are evidence for review, never a duplicate decision.
+- Robustness (section 14): the `eurosat-c-v1` noise severities are strong for 64 px tiles. On VAL
+  the lowest one (sigma 0.04) already brings both pretrained models near the 0.10 chance level
+  and every noise condition below 0.65 balanced accuracy for all models, so the noise results
+  resolve little between models. Severities are frozen; this is reported, not changed.
 - Bootstrap CIs on small evaluation sets are coarse; with 54 test images a single error moves
   accuracy by ~0.019. Perfect predictions give a degenerate CI [1, 1], which does not mean the
   true error rate is zero.
