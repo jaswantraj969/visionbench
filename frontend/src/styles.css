@@ -384,6 +384,11 @@ button:disabled {
   width: 112px;
   font-size: 0.78rem;
 }
+.image-grid figcaption {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .image-grid img {
   width: 112px;
   height: 112px;

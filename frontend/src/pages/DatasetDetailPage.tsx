@@ -174,7 +174,9 @@ function Samples({ d }: { d: DatasetDetail }) {
                   alt={`${cls} sample ${rel}`}
                   loading="lazy"
                 />
-                <figcaption className="mono">{rel.split("/").pop()}</figcaption>
+                <figcaption className="mono" title={rel}>
+                  {rel.split("/").pop()}
+                </figcaption>
               </figure>
             ))}
           </div>

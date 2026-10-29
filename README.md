@@ -12,9 +12,12 @@ It ships with one frozen, pre-registered benchmark, `eurosat-v1`:
 - the checkpoints were selected on VALIDATION only;
 - the TEST split is evaluated exactly once, following a committed analysis plan.
 
-> **Status: `v1.0.0-rc1`.** Everything below works and is tested, but the eurosat-v1 TEST split has
-> **not** been evaluated in this release candidate. The only numbers shown are
-> **VALIDATION (selection-biased) — not test results**.
+> **Status: `v1.0.0`.** The eurosat-v1 TEST split has been evaluated once, per the committed
+> plan (with one procedural amendment); see [Results](#results-eurosat-v1) and
+> [FINAL_REPORT.md](benchmarks/eurosat-v1/results/FINAL_REPORT.md). Every number is labelled
+> TEST or VALIDATION (selection-biased).
+
+![Benchmark page: TEST results with rank groups and the pre-registered comparisons](docs/screenshots/09-benchmark-test.png)
 
 Contents:
 - [Architecture](#architecture)
@@ -126,31 +129,59 @@ The demo dataset is small (3 classes × 40 images, 32 × 32 px). Train `small_cn
 
 ## Results (eurosat-v1)
 
-**TEST: not evaluated yet** in `v1.0.0-rc1`. The single TEST evaluation follows
-`benchmarks/eurosat-v1/FINAL_ANALYSIS_PLAN.md` (committed before any test access).
+EuroSAT RGB, one fixed leakage-aware split (4,050 TEST images), 5 models × 3 seeds, one clean
+TEST evaluation per run of the VAL-selected checkpoint, analysed exactly as pre-registered in
+[FINAL_ANALYSIS_PLAN.md](benchmarks/eurosat-v1/FINAL_ANALYSIS_PLAN.md). Full tables, per-run
+CIs and every limitation: [FINAL_REPORT.md](benchmarks/eurosat-v1/results/FINAL_REPORT.md).
 
-What exists now is the multi-seed summary on the validation split.
+| rank | model | balanced accuracy (TEST) | macro F1 (TEST) | balanced accuracy (VALIDATION, selection-biased) | rank group |
+|---|---|---|---|---|---|
+| 1 | efficientnet_b0_imagenet_224 | 0.9844 ± 0.0014 | 0.9846 ± 0.0015 | 0.9871 ± 0.0027 | 1 |
+| 2 | resnet18_imagenet_224 | 0.9836 ± 0.0033 | 0.9839 ± 0.0032 | 0.9862 ± 0.0035 | 1 |
+| 3 | small_cnn_scratch_64 | 0.9561 ± 0.0027 | 0.9570 ± 0.0027 | 0.9556 ± 0.0027 | 2 |
+| 4 | resnet18_scratch_64 | 0.9133 ± 0.0457 | 0.9137 ± 0.0455 | 0.9125 ± 0.0485 | 2 |
+| 5 | majority_baseline | 0.1000 ± 0.0000 | 0.0200 ± 0.0000 | 0.1000 ± 0.0000 | 3 |
 
-**VALIDATION (selection-biased) — not test results.**
-- These are mean ± sample sd over seeds 0, 1 and 2.
-- The split is fixed, so the sd reflects training variance only.
-- These numbers chose the checkpoints, so they are optimistic.
-- They were run on one shared laptop GPU (RTX 3050 6 GB), with the epoch cap of the frozen
-  protocol.
+Mean ± sample sd over seeds 0, 1, 2 (the split is fixed, so the sd is training variance only).
 
-| model | balanced accuracy (VAL) | macro F1 (VAL) |
-|---|---|---|
-| efficientnet_b0_imagenet_224 | 0.9871 ± 0.0027 | 0.9873 ± 0.0026 |
-| resnet18_imagenet_224 | 0.9862 ± 0.0035 | 0.9864 ± 0.0036 |
-| small_cnn_scratch_64 | 0.9556 ± 0.0027 | 0.9563 ± 0.0029 |
-| resnet18_scratch_64 | 0.9125 ± 0.0485 | 0.9127 ± 0.0488 |
-| majority_baseline | 0.1000 ± 0.0000 | 0.0200 ± 0.0000 |
+**Pre-registered comparisons** (seed-matched paired bootstrap of A − B; "distinguishable" only if
+all three seeds' 95 % CIs exclude zero in the same direction):
 
-- The two pretrained models also use 224 px input, while the scratch models use 64 px. This
-  difference in resolution and pretraining is a confound; the VAL numbers do not separate the
-  two effects.
-- VAL robustness under 12 corruption conditions:
-  [results/robustness_val.md](benchmarks/eurosat-v1/results/robustness_val.md) (VALIDATION).
+| A − B | decision (balanced accuracy and macro F1) |
+|---|---|
+| efficientnet_b0_imagenet_224 − resnet18_imagenet_224 | not distinguishable |
+| small_cnn_scratch_64 − resnet18_scratch_64 | not distinguishable (seed 2's CI includes zero) |
+| resnet18_imagenet_224 − resnet18_scratch_64 | distinguishable: resnet18_imagenet_224 > resnet18_scratch_64 |
+
+**Robustness (TEST, 12 synthetic corruption conditions):** mean corrupted balanced accuracy
+ranges from 0.4372 (efficientnet_b0) to 0.5869 (resnet18_scratch); the models with the highest
+clean accuracy lose the most under these corruptions. Tables:
+[robustness_test.md](benchmarks/eurosat-v1/results/robustness_test.md). No model is called
+robust.
+
+**How to read this:**
+- Pretraining and input resolution are confounded (224 px pretrained vs 64 px scratch), so
+  comparison 3 cannot attribute the difference to either.
+- One split, n = 3 seeds, a 25-epoch cap and untuned learning rates: the numbers describe these
+  budgets on EuroSAT RGB, not each architecture's best accuracy.
+- VALIDATION numbers chose the checkpoints and are selection-biased.
+- **Amendment 1 (procedural):** the corrupted-image cache path gained the split name after the
+  first TEST materialization pass collided with the VAL cache; nothing else changed, no
+  robustness TEST result existed then, and the 15 clean TEST evaluations were not redone.
+
+## Screenshots
+
+Genuine screenshots of the app on the real data root (1600 × 1200):
+
+| | |
+|---|---|
+| ![Overview](docs/screenshots/01-overview.png) | ![Dataset with seeded sample tiles and attribution](docs/screenshots/02-dataset.png) |
+| ![Training form](docs/screenshots/03-training-form.png) | ![Job progress](docs/screenshots/04-job-progress.png) |
+| ![Experiment detail with curves](docs/screenshots/05-experiment-detail.png) | ![VALIDATION comparison with confound flags](docs/screenshots/06-comparison.png) |
+| ![Prediction and Grad-CAM](docs/screenshots/07-explain-gradcam.png) | ![Robustness](docs/screenshots/08-robustness.png) |
+| ![Benchmark TEST section](docs/screenshots/09-benchmark-test.png) | ![Benchmark protocol hashes and runs](docs/screenshots/10-benchmark-top.png) |
+
+Images: EuroSAT (Helber et al., 2019; MIT license); contains modified Copernicus Sentinel data.
 
 ## The web app
 
@@ -165,13 +196,14 @@ origin on <http://127.0.0.1:8000>.
 | Jobs | live progress, result, error; confirmed cancel |
 | Experiments | filters, benchmark/pilot tags, config (n/a for settings a model does not use), curves with the best epoch, artifacts |
 | Evaluate & Compare | start a VAL evaluation, metrics with CIs, confusion matrix, compare runs with paired differences and confound flags |
-| Explain | seeded VALIDATION image browser or upload → probabilities and Grad-CAM, with its limitations always visible |
+| Explain | seeded VALIDATION (or, after the final evaluation, TEST) image browser or upload → probabilities and Grad-CAM, with its limitations always visible |
 | Robustness | suite, mean ± sd per model, severity charts, start a VAL robustness job |
 | Benchmark | protocol hashes, documents, the 15 runs, the VALIDATION summary, the TEST section |
 
 - **Labels:** every metric shows its split label, either "VALIDATION (selection-biased)" or "TEST".
-- **TEST access:** TEST evaluation and TEST images are not offered while the test split is
-  locked.
+- **TEST access:** TEST evaluation is never offered in the app. TEST images of a split are
+  offered only after that split's single final evaluation (its benchmark has
+  `results/FINAL_REPORT.json`); every other split stays locked.
 - **Attribution:** EuroSAT attribution is shown wherever dataset tiles appear.
 
 ## Datasets
@@ -489,7 +521,8 @@ curl.exe -s http://127.0.0.1:8000/api/robustness/rb-YYYYMMDD-HHMMSS-xxxxxx
 
 These commands were run against the real eurosat-v1 seed-0 models (CPU inference).
 - The image must be a recorded dataset image (`dataset_id` + `relpath`) or an upload (`file`).
-- TEST-split images are refused while the test split is locked.
+- TEST-split images are refused until that split's final TEST evaluation is complete (the
+  response below was recorded before it; `sp-55320e11726c` is now finalised).
 
 ```powershell
 # a recorded VAL image
@@ -720,8 +753,7 @@ and the Docker build.
 
 ## License and attribution
 
-- **VisionBench license:** not chosen yet, so there is no `LICENSE` file. *TODO (owner): choose
-  a license.* `pyproject.toml` says "Proprietary" until then.
+- **VisionBench:** MIT License, Copyright (c) 2026 Jaswant Raj ([LICENSE](LICENSE)).
 - **EuroSAT** (Helber et al., 2019) is used under the MIT license and contains modified
   Copernicus Sentinel data. The citation, license and download record are in
   [DATASETS.md](DATASETS.md). Dataset files are never committed.
@@ -732,4 +764,6 @@ and the Docker build.
 
 [ARCHITECTURE.md](ARCHITECTURE.md) · [EXPERIMENT_PROTOCOL.md](EXPERIMENT_PROTOCOL.md) ·
 [DATASETS.md](DATASETS.md) · [PROJECT_STATUS.md](PROJECT_STATUS.md) ·
-[CHANGELOG.md](CHANGELOG.md) · [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)
+[CHANGELOG.md](CHANGELOG.md) · [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) ·
+[DEFINITION_OF_DONE.md](DEFINITION_OF_DONE.md) ·
+[FINAL_REPORT.md](benchmarks/eurosat-v1/results/FINAL_REPORT.md)

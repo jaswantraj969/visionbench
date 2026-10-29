@@ -7,7 +7,8 @@ name = "visionbench"
 description = "Reproducible computer-vision benchmarking and explainability platform."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
-license = { text = "Proprietary" }
+license = { text = "MIT" }
+authors = [{ name = "Jaswant Raj" }]
 dynamic = ["version"]
 # torch/torchvision are listed with compatible ranges; install the build
 # (CPU or CUDA) from the official PyTorch wheel index first — see README.
