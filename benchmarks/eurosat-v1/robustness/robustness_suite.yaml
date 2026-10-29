@@ -1,0 +1,17 @@
+# Corruption suite for the eurosat-v1 benchmark (frozen; see ROBUSTNESS_PROTOCOL.md).
+# Severities are fixed here and never tuned on results; any change is a dated amendment.
+suite: eurosat-c-v1
+base_seed: 0
+corruptions:
+  gaussian_noise:
+    parameter: sigma          # standard deviation of additive N(0, sigma), pixel values in [0, 1]
+    severities: [0.04, 0.08, 0.12]
+  gaussian_blur:
+    parameter: sigma_px       # Gaussian sigma in pixels of the 64 px original
+    severities: [0.5, 1.0, 1.5]
+  brightness:
+    parameter: delta_v        # added to V of HSV (V in [0, 1]), clipped to 1
+    severities: [0.1, 0.2, 0.3]
+  jpeg:
+    parameter: quality        # Pillow JPEG quality, 4:2:0 chroma subsampling
+    severities: [50, 25, 10]
