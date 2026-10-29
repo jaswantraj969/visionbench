@@ -28,7 +28,6 @@ Built a local platform for benchmarking image classifiers without test leakage: 
 ## Project URL
 
 https://github.com/jaswantraj969/visionbench
-(**Not live yet:** the repository has not been published; see the release notes.)
 
 ## Images (1600 x 1200, from `docs/screenshots/`)
 

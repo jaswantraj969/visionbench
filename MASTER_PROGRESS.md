@@ -92,15 +92,9 @@ Status values: todo / in progress / done / blocked.
 | S3 final report + app unlock + Benchmark TEST section | done | (this commit) | FINAL_REPORT.md/.json and robustness_test.md/.json from scripts/final_report.py (rank groups {efficientnet, resnet18_imagenet} > {small_cnn, resnet18_scratch} > {baseline}; comparisons 1 and 2 not distinguishable, 3 distinguishable: resnet18_imagenet > resnet18_scratch); amendment 1 added to the constraints; TEST images unlocked per finalised split only; Benchmark TEST section |
 | S4 screenshots + README + DoD + LICENSE | done | (this commit) | 10 screenshots 1600x1200 from the real app on the real data root (docs/screenshots); README results/screenshots/license; DEFINITION_OF_DONE.md (14 items); LICENSE MIT (Jaswant Raj); image captions no longer overlap |
 | S5 pre-publish audit | done | (this commit; hashes per COMMIT_MAP.md) | author+committer of all commits and taggers -> Jaswant Raj <214715227+jaswantraj969@users.noreply.github.com> (git filter-repo, dates kept); local paths with the Windows user name replaced by <repo>/<home> in every commit; scans: no secrets, no .env, no var/ content, no weights, images only in docs/screenshots, no personal emails (commit trailers keep noreply@anthropic.com); backend 362 passed / 1 skipped both modes, frontend lint/typecheck/43 tests/build, e2e 1 passed; tag v1.0.0 |
-| S6 publish | **blocked** | | `gh auth status`: jaswantraj969; `gh repo create ... --public --push` was denied by the local permission classifier (create public surface); not worked around. No remote exists. |
+| S6 publish | done | | public repo https://github.com/jaswantraj969/visionbench, tags pushed, topics set; first CI run failed (flaky cancel test, fixed); CI green: https://github.com/jaswantraj969/visionbench/actions/runs/40917916209 |
 | S7 Upwork package | done | (this commit) | docs/upwork/UPWORK_PORTFOLIO.md |
 
 ## Next action
 
-Owner: allow the publish step (or run it yourself), then watch CI:
-
-    git branch -m master main
-    gh repo create jaswantraj969/visionbench --public --source . --push --description "..."
-    git push origin --tags
-    gh repo edit jaswantraj969/visionbench --add-topic computer-vision,pytorch,fastapi,react,typescript,explainable-ai,grad-cam,benchmarking,eurosat,mlops
-    gh run watch
+None: released.

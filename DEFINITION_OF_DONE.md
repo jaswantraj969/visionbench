@@ -15,7 +15,7 @@ marked **not met**.
 | 8 | Robustness tests are reproducible | met | Every corrupted condition is materialized once with a hashed manifest and verified byte for byte on rerun (VAL 12/12 in M6, again after the cache move; TEST 12/12 on the second pass); 180 VAL + 180 TEST robustness evaluations, each paired with its clean evaluation. |
 | 9 | Frontend connected to working endpoints | met | 9 pages over the real API, generated API types with a stale check, Playwright e2e against a real backend, a page-by-page walk and screenshots on the real data root. |
 | 10 | Unit/integration/frontend tests pass; limitations reported | met | Backend suite (Windows normal and GPU-hidden; Linux container), 43 frontend tests, e2e; limitations in README, EXPERIMENT_PROTOCOL.md, DATASETS.md and FINAL_REPORT.md. |
-| 11 | Docker and CI work | **partly met** | Docker: image built, ran healthy, Quick Start A verified (Phase B). CI: GitHub Actions status recorded below after publishing. |
+| 11 | Docker and CI work | met | Docker: image built, ran healthy, Quick Start A verified (Phase B). CI: GitHub Actions run [40917916209](https://github.com/jaswantraj969/visionbench/actions/runs/40917916209) green on all four jobs (backend, frontend, e2e, docker). |
 | 12 | Docs cover install, architecture, usage, reproducibility, limitations, troubleshooting | met | README (Quick Start, architecture diagram, app, API, Docker, reproduction, troubleshooting, limitations, license), ARCHITECTURE.md, EXPERIMENT_PROTOCOL.md, DATASETS.md, the frozen protocols and FINAL_ANALYSIS_PLAN.md. |
 | 13 | No known defect concealed | met | Known issues are listed below and in REVIEW_PACKET.md, including the cache-path defect found during the TEST run and its amendment. |
 | 14 | Presentable repo with genuine screenshots and results | met | `docs/screenshots/` (taken from the real app on the real data), README results summary linked to FINAL_REPORT.md. |
@@ -37,7 +37,8 @@ marked **not met**.
 
 ## CI
 
-**Not met yet:** `.github/workflows/ci.yml` has never run on GitHub Actions. Publishing the
-repository was blocked by the local permission settings, so there is no remote. Every CI step
-was run locally (backend suite on Windows and in the Linux container, frontend checks, e2e,
-Docker build).
+GitHub Actions passed on `main`: https://github.com/jaswantraj969/visionbench/actions/runs/40917916209 (backend, frontend, e2e, docker all green).
+The first run on publishing failed in one backend test
+(`test_cancel_timeout_terminates_training_child`): on the faster runner the tiny training run
+early-stopped before the cancel request. Early stopping was disabled in that test; its intent is
+unchanged.
