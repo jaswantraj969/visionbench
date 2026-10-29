@@ -43,7 +43,7 @@ Status values: todo / in progress / done / blocked.
 | step | status | commit | notes |
 |---|---|---|---|
 | C1 FINAL_ANALYSIS_PLAN.md + hashes (before any test access) | done | 3677583 | plan sha256 11de6e1c…; committed before rc1 (earlier than the task order); 0 TEST evaluations at that commit |
-| C2 freeze checklist (a-g) | todo | | |
+| C2 freeze checklist (a-g) | in progress | c2aeec4 (v1.0.0-rc1) | a: clean tree, HEAD = v1.0.0-rc1; f: full suite on a `git archive` of v1.0.0-rc1, 359 passed / 1 skipped normal (555.24 s) and GPU hidden (554.73 s); g: authorization line "proceed automatically"; b-e: `run_benchmark.py freeze-check` is the first step of the C3 run and stops it on failure |
 | C3 clean TEST x15, materialize TEST x2, robustness TEST 15x12 | todo | | |
 | C5 FINAL_REPORT.md (+JSON) from a committed script | todo | | |
 | C6 unlock for the app, Benchmark TEST section, check counts | todo | | |
@@ -85,6 +85,6 @@ Status values: todo / in progress / done / blocked.
 
 ## Next action
 
-Phase C, C2: freeze checklist on the rc1 commit (a: clean tree, HEAD = rc1; b-e:
-`run_benchmark.py freeze-check`; f: full suite in both modes on HEAD; g: authorization).
-Then C3 per FINAL_ANALYSIS_PLAN.md §2.
+C3 is being run. **On resume: run `python scripts/run_benchmark.py check benchmarks/eurosat-v1` and read
+`benchmarks/eurosat-v1/results/test_runs.json` first; never repeat a clean TEST evaluation.**
+The drivers skip runs/conditions that already have rows.
