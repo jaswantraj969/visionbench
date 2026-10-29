@@ -118,7 +118,9 @@ def test_cancel_timeout_terminates_child(train_env, worker) -> None:
 def test_cancel_timeout_terminates_training_child(train_env, worker) -> None:
     """Training normally honours cancel; the test-only hook makes it ignore the request."""
     with job_store(train_env.settings) as s:
-        job_id = s.enqueue("train", _train_params(train_env, epochs=500), max_queued=10)
+        # early stopping off: on a fast machine it would end the tiny run before the cancel
+        params = _train_params(train_env, epochs=500, early_stopping={"enabled": False})
+        job_id = s.enqueue("train", params, max_queued=10)
     worker(max_jobs=1, VISIONBENCH_CANCEL_TIMEOUT_SECONDS="1", **{TEST_IGNORE_CANCEL_ENV: "1"})
     job = wait_for(
         lambda: (
