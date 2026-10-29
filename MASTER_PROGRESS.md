@@ -91,8 +91,9 @@ Status values: todo / in progress / done / blocked.
 | S2 robustness TEST + check update | done | (this commit) | materialize TEST pass 1 written 12/12 (199.6 s), pass 2 verified 12/12 with identical condition hashes (750.7 s); robustness TEST 15 runs x 12 = 180, all first attempts (2567.6 s, CUDA, keep-awake; an owner's game was also using the GPU); check: exactly 1 clean + 12 robustness TEST per run, 0 elsewhere |
 | S3 final report + app unlock + Benchmark TEST section | done | (this commit) | FINAL_REPORT.md/.json and robustness_test.md/.json from scripts/final_report.py (rank groups {efficientnet, resnet18_imagenet} > {small_cnn, resnet18_scratch} > {baseline}; comparisons 1 and 2 not distinguishable, 3 distinguishable: resnet18_imagenet > resnet18_scratch); amendment 1 added to the constraints; TEST images unlocked per finalised split only; Benchmark TEST section |
 | S4 screenshots + README + DoD + LICENSE | done | (this commit) | 10 screenshots 1600x1200 from the real app on the real data root (docs/screenshots); README results/screenshots/license; DEFINITION_OF_DONE.md (14 items); LICENSE MIT (Jaswant Raj); image captions no longer overlap |
-| S5 pre-publish audit | in progress | | |
+| S5 pre-publish audit | done | (this commit; hashes per COMMIT_MAP.md) | author+committer of all commits and taggers -> Jaswant Raj <214715227+jaswantraj969@users.noreply.github.com> (git filter-repo, dates kept); local paths with the Windows user name replaced by <repo>/<home> in every commit; scans: no secrets, no .env, no var/ content, no weights, images only in docs/screenshots, no personal emails (commit trailers keep noreply@anthropic.com); backend 362 passed / 1 skipped both modes, frontend lint/typecheck/43 tests/build, e2e 1 passed; tag v1.0.0 |
+| S6 publish | in progress | | |
 
 ## Next action
 
-S5: identity rewrite, secret/personal-data scan, full checks, tag v1.0.0.
+S6: create the public GitHub repo, push, watch CI.
